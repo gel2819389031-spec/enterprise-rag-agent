@@ -26,7 +26,7 @@ class ChatService:
         model = request.model or self._settings.llm_model
 
         # Call the LLM directly. No vector search or context packing happens in this step.
-        answer = self._client.chat(request.question.strip(), model)
+        answer = self._client.chat(request.question.strip(), model, request.history)
 
         # Build the unified response payload.
         return ChatData(

@@ -7,8 +7,10 @@ import lombok.Data;
  */
 @Data
 public class ChatRequest {
+
     /** 已有会话 ID；为空时创建新会话。 */
     private Long conversationId;
+
 
     /** 可选知识库 ID；基础问答阶段可以为空。 */
     private Long knowledgeBaseId;

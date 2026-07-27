@@ -2,6 +2,12 @@
 
 from pydantic import BaseModel, Field
 
+class ChatHistoryMessage(BaseModel):
+    """One historical chat message."""
+
+    role: str = Field(..., description="Message role: USER or ASSISTANT.")
+    content: str = Field(..., description="Message content.")
+
 
 class ChatRequest(BaseModel):
     """Request body for a user question.
@@ -9,9 +15,9 @@ class ChatRequest(BaseModel):
     This first version does not run retrieval. It only sends the question
     directly to the configured chat model.
     """
-
     question: str = Field(..., min_length=1, description="User question.")
     model: str | None = Field(default=None, description="Optional chat model name.")
+    history: list[ChatHistoryMessage] = Field(default_factory=list, description="Recent conversation history.")
 
 
 class ChatData(BaseModel):

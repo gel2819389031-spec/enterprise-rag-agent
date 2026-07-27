@@ -1,6 +1,7 @@
 package com.example.rag.chat.client;
 
 import com.example.rag.chat.client.dto.PythonChatData;
+import com.example.rag.chat.client.dto.PythonChatHistoryMessage;
 import com.example.rag.chat.client.dto.PythonChatRequest;
 import com.example.rag.chat.client.dto.PythonChatResponse;
 import com.example.rag.common.error.BaseErrorCode;
@@ -17,6 +18,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.List;
 
 /**
  * PythonChatClient
@@ -32,11 +34,12 @@ public class PythonChatClient {
     private final EmbeddingClientProperties properties;
     private final ObjectMapper objectMapper;
 
-    public PythonChatData chat(String question, String model) {
+    public PythonChatData chat(String question, String model, List<PythonChatHistoryMessage> history) {
         try{
             PythonChatRequest requestBody = new PythonChatRequest();
             requestBody.setQuestion(question);
             requestBody.setModel(model);
+            requestBody.setHistory(history);
             String json=objectMapper.writeValueAsString(requestBody);
             String url = properties.getPythonBaseUrl() + "/api/chat/completions";
             HttpRequest request = HttpRequest.newBuilder()

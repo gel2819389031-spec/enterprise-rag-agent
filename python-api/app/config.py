@@ -43,6 +43,15 @@ class Settings:
     llm_model: str
     llm_temperature: float
     llm_timeout_seconds: int
+    # PostgreSQL
+    postgres_host: str
+    postgres_port: int
+    postgres_db: str
+    postgres_user: str
+    postgres_password: str
+    # RAG
+    rag_top_k: int
+    rag_max_context_chars: int
 
     java_api_base_url: str
 
@@ -73,5 +82,12 @@ def get_settings() -> Settings:
         llm_model=os.getenv("LLM_MODEL", "qwen-plus"),
         llm_temperature=float(os.getenv("LLM_TEMPERATURE", "0.2")),
         llm_timeout_seconds=int(os.getenv("LLM_TIMEOUT_SECONDS", "60")),
+        postgres_host=os.getenv("POSTGRES_HOST", "127.0.0.1"),
+        postgres_port=int(os.getenv("POSTGRES_PORT", "5432")),
+        postgres_db=os.getenv("POSTGRES_DB", "enterprise_rag"),
+        postgres_user=os.getenv("POSTGRES_USER", ""),
+        postgres_password=os.getenv("POSTGRES_PASSWORD", ""),
+        rag_top_k=int(os.getenv("RAG_TOP_K", "5")),
+        rag_max_context_chars=int(os.getenv("RAG_MAX_CONTEXT_CHARS", "6000")),
         java_api_base_url=os.getenv("JAVA_API_BASE_URL", "http://localhost:8123"),
     )

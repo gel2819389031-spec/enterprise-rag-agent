@@ -2,6 +2,8 @@ package com.example.rag.chat.client.dto;
 
 import lombok.Data;
 
+import java.util.List;
+
 /**
  * 调用 Python Chat 接口的请求体。
  */
@@ -9,7 +11,7 @@ import lombok.Data;
 public class PythonChatRequest {
 
     /**
-     * 用户问题。
+     * 用户当前问题。
      */
     private String question;
 
@@ -17,4 +19,9 @@ public class PythonChatRequest {
      * 可选模型名称。
      */
     private String model;
+
+    /**
+     * 最近几轮历史消息。
+     */
+    private List<PythonChatHistoryMessage> history;
 }
