@@ -1,0 +1,18 @@
+# server profile 专用配置。启用方式：SPRING_PROFILES_ACTIVE=server。
+spring:
+  datasource:
+    # 服务器数据库连接必须由环境变量提供，避免误连默认库。
+    driver-class-name: org.postgresql.Driver
+    url: ${RAG_DB_URL}
+    username: ${RAG_DB_USERNAME}
+    password: ${RAG_DB_PASSWORD}
+  flyway:
+    # 服务器环境启动时也自动执行 Flyway 迁移。
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+
+rag:
+  python-agent:
+    # 服务器环境下可覆盖 Python Agent 地址。
+    base-url: ${RAG_PYTHON_AGENT_BASE_URL:http://localhost:8090}

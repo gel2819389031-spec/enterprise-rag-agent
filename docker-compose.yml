@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: enterprise-rag-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${RAG_DB_NAME:-enterprise_rag}
+      POSTGRES_USER: ${RAG_DB_USERNAME:-rag}
+      POSTGRES_PASSWORD: ${RAG_DB_PASSWORD:-rag}
+      TZ: Asia/Shanghai
+    ports:
+      - "${RAG_DB_PORT:-5432}:5432"
+    volumes:
+      - rag_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  rag_postgres_data:

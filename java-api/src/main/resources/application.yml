@@ -1,0 +1,66 @@
+# Java API 基础配置。数据库默认值放在这里，server profile 可用环境变量覆盖。
+server:
+  # HTTP 服务端口。
+  port: 8123
+
+spring:
+  application:
+    # 应用名称，会出现在日志、Actuator 和服务注册信息中。
+    name: enterprise-rag-java-api
+  datasource:
+    # PostgreSQL JDBC 驱动。
+    driver-class-name: org.postgresql.Driver
+    # 默认本地数据库连接；服务器环境建议通过 RAG_DB_URL 覆盖。
+    url: ${RAG_DB_URL:jdbc:postgresql://localhost:5432/enterprise_rag}
+    # 默认数据库用户名；服务器环境建议通过 RAG_DB_USERNAME 覆盖。
+    username: ${RAG_DB_USERNAME:rag}
+    # 默认数据库密码；真实密码不要写入代码仓库。
+    password: ${RAG_DB_PASSWORD:rag}
+  flyway:
+    # 应用启动时自动执行未运行过的数据库迁移脚本。
+    enabled: true
+    # Flyway 从 classpath 下扫描 SQL 脚本。
+    locations: classpath:db/migration
+    # 如果目标库已有历史对象，可建立基线后继续迁移。
+    baseline-on-migrate: true
+  servlet:
+    multipart:
+      max-file-size: 100MB
+      max-request-size: 120MB
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # 暴露健康检查、基础信息和指标端点。
+        include: health,info,metrics
+rustfs:
+    endpoint: ${RAG_STORAGE_ENDPOINT:http://121.40.128.24:9000}
+    access-key-id: ${RAG_STORAGE_ACCESS_KEY_ID}
+    secret-access-key: ${RAG_STORAGE_SECRET_ACCESS_KEY}
+    bucket: ${RAG_STORAGE_BUCKET:rag-documents}
+    region: ${RAG_STORAGE_REGION:us-east-1}
+    path-style-access: true
+rag:
+
+  embedding:
+    python-base-url: ${RAG_EMBEDDING_PYTHON_BASE_URL:http://localhost:9100}
+    model: ${RAG_EMBEDDING_MODEL:mock-embedding-1536}
+    dimension: ${RAG_EMBEDDING_DIMENSION:1536}
+    batch-size: ${RAG_EMBEDDING_BATCH_SIZE:16}
+    timeout-seconds: ${RAG_EMBEDDING_TIMEOUT_SECONDS:60}
+  python-agent:
+    # Python LangGraph Agent 的服务地址，后续 Java 会通过它调用编排链路。
+    base-url: http://localhost:8090
+    # Java 调用 Python Agent 的超时时间。
+    timeout-seconds: 60
+
+mybatis-plus:
+  global-config:
+    db-config:
+      # MyBatis-Plus 逻辑删除字段。delete/deleteById 会更新该字段，而不是物理删除。
+      logic-delete-field: deleted
+      # PostgreSQL boolean 类型用 true 表示已删除，等价于业务语义里的 1。
+      logic-delete-value: true
+      # PostgreSQL boolean 类型用 false 表示未删除，等价于业务语义里的 0。
+      logic-not-delete-value: false
