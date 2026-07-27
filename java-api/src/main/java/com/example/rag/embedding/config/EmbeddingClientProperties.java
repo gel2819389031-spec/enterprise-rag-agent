@@ -24,7 +24,7 @@ public class EmbeddingClientProperties {
     /**
      * 默认 Embedding 模型名称。
      */
-    private String model = "mock-embedding-1536";
+    private String model = "";
 
     /**
      * 向量维度，需要和 PostgreSQL vector(1536) 保持一致。

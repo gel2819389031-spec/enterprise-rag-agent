@@ -20,7 +20,7 @@ router = APIRouter(prefix="/api", tags=["embedding"])
 
 
 
-@lru_cache
+#@lru_cache
 def get_embedding_service() -> EmbeddingService:
     """获取 EmbeddingService 单例。"""
     return EmbeddingService()

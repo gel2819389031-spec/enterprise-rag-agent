@@ -1,0 +1,23 @@
+"""Request and response schemas for the basic chat API."""
+
+from pydantic import BaseModel, Field
+
+
+class ChatRequest(BaseModel):
+    """Request body for a user question.
+
+    This first version does not run retrieval. It only sends the question
+    directly to the configured chat model.
+    """
+
+    question: str = Field(..., min_length=1, description="User question.")
+    model: str | None = Field(default=None, description="Optional chat model name.")
+
+
+class ChatData(BaseModel):
+    """Response payload for a basic chat answer."""
+
+    question: str = Field(..., description="Original user question.")
+    answer: str = Field(..., description="Model answer.")
+    model: str = Field(..., description="Actual model used.")
+    mode: str = Field(default="basic", description="Chat mode.")

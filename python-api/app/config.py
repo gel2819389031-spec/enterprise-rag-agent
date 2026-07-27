@@ -36,6 +36,14 @@ class Settings:
     embedding_batch_size: int
     embedding_timeout_seconds: int
 
+    # LLM chat model settings.
+    llm_provider: str
+    llm_base_url: str
+    llm_api_key: str
+    llm_model: str
+    llm_temperature: float
+    llm_timeout_seconds: int
+
     java_api_base_url: str
 
 
@@ -59,5 +67,11 @@ def get_settings() -> Settings:
         embedding_dimension=int(os.getenv("EMBEDDING_DIMENSION", "1536")),
         embedding_batch_size=int(os.getenv("EMBEDDING_BATCH_SIZE", "16")),
         embedding_timeout_seconds=int(os.getenv("EMBEDDING_TIMEOUT_SECONDS", "60")),
+        llm_provider=os.getenv("LLM_PROVIDER", "openai"),
+        llm_base_url=os.getenv("LLM_BASE_URL", os.getenv("EMBEDDING_BASE_URL", "")),
+        llm_api_key=os.getenv("LLM_API_KEY", os.getenv("EMBEDDING_API_KEY", "")),
+        llm_model=os.getenv("LLM_MODEL", "qwen-plus"),
+        llm_temperature=float(os.getenv("LLM_TEMPERATURE", "0.2")),
+        llm_timeout_seconds=int(os.getenv("LLM_TIMEOUT_SECONDS", "60")),
         java_api_base_url=os.getenv("JAVA_API_BASE_URL", "http://localhost:8123"),
     )

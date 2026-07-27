@@ -11,6 +11,7 @@
 import uvicorn
 from fastapi import FastAPI
 
+from app.api.chat_api import router as chat_router
 from app.api.embedding_api import router as embedding_router
 from app.api.health_api import router as health_router
 from app.config import get_settings
@@ -37,6 +38,7 @@ def create_app() -> FastAPI:
     # 每个 router 可以理解为一组 Controller 方法。
     app.include_router(health_router)
     app.include_router(embedding_router)
+    app.include_router(chat_router)
 
     return app
 
