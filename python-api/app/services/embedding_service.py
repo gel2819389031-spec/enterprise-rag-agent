@@ -31,7 +31,6 @@ class EmbeddingService:
 
         # 如果请求没有指定模型，就使用配置里的默认模型。
         model = request.model or self._settings.embedding_model
-
         # 调用 Client 层，当前版本会生成稳定 Mock 向量。
         vectors = self._client.embed_texts(request.texts, model)
 

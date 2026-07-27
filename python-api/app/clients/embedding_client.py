@@ -5,70 +5,92 @@ Client 层负责和外部模型服务交互。
 当前第一版还不接真实模型，而是生成稳定的 Mock Embedding。
 这样可以先跑通 Python API、Java 调 Python、pgvector 写入链路。
 """
-
-import hashlib
-import random
-from math import sqrt
+from fastapi import HTTPException
+from langchain.embeddings import init_embeddings
+from langchain_openai import OpenAIEmbeddings
 
 from app.config import get_settings
 
 
 class EmbeddingClient:
-    """Client used to create embeddings.
-
-    Later this class can be extended to call OpenAI-compatible, DashScope,
-    Jina, BGE, or local embedding services.
+    """
+    langchain embedding客户端
+       Client 层只负责模型调用。
+    Service 层负责请求校验和响应组装
     """
 
     def __init__(self) -> None:
         # 读取向量维度等配置。
         self._settings = get_settings()
+        # 创建 LangChain Embedding 模型对象。
+        self._embedding=OpenAIEmbeddings(
+            model=self._settings.embedding_model,
+            api_key=self._settings.embedding_api_key,
+            base_url=self._settings.embedding_base_url,
+            dimensions=self._settings.embedding_dimension,
+            request_timeout=self._settings.embedding_timeout_seconds,
+
+            # 关键配置：
+            # 关闭 LangChain 自动 token 化与自动按 token 分片。
+            # DashScope 的 OpenAI 兼容接口要求 input 是 str 或 list[str]，
+            # 如果 LangChain 传 token id 数组，会触发 contents is neither str nor list of str。
+            check_embedding_ctx_length=False,
+        )
+
 
     def embed_texts(self, texts: list[str], model: str) -> list[list[float]]:
-        """Create embeddings for multiple texts.
+          #批量生成文本向量
+        if model and model!=self._settings.embedding_model:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Embedding model mismatch: "
+                    f"request={model}, configured={self._settings.embedding_model}"
+                ),
+            )
 
-        真实模型接入后，这里会改成 HTTP 调用模型供应商。
-        当前先对每个文本生成一个 Mock 向量。
-        """
-        return [self._mock_embedding(text, model) for text in texts]
+        try:
+            vectors = self._embedding.embed_documents(texts)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Call LangChain embedding model failed: {exc}",
+            ) from exc
 
-    def _mock_embedding(self, text: str, model: str) -> list[float]:
-        """Create a stable mock vector from text and model name.
+        self._validate_vectors(vectors, len(texts))
+        return vectors
 
-        The same text and model will always produce the same vector. This is
-        better than random vectors for local tests.
-        """
-        # 使用 model + text 计算 hash。
-        # 同样的 model 和 text 会得到同样的 seed。
-        seed_bytes = hashlib.sha256(f"{model}:{text}".encode("utf-8")).digest()
+    def embed_query(self, text: str) -> list[float]:
+        """生成用户问题向量，后续 RAG 检索会复用。"""
+        try:
+            vector = self._embedding.embed_query(text)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Call LangChain query embedding failed: {exc}",
+            ) from exc
 
-        # 取前 8 个字节转换为整数，作为伪随机数种子。
-        seed = int.from_bytes(seed_bytes[:8], byteorder="big", signed=False)
+        self._validate_vector(vector)
+        return vector
 
-        # random.Random(seed) 是独立随机数生成器。
-        # 只要 seed 一样，生成的随机序列就一样。
-        rng = random.Random(seed)
+    def _validate_vectors(self, vectors: list[list[float]], expected_size: int) -> None:
+        """校验批量向量数量和每个向量维度。"""
+        if len(vectors) != expected_size:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Embedding count mismatch: expected={expected_size}, actual={len(vectors)}",
+            )
 
-        # 生成指定维度的向量。
-        # 当前默认维度是 1536，对应数据库 embedding vector(1536)。
-        vector = [
-            rng.uniform(-1.0, 1.0)
-            for _ in range(self._settings.embedding_dimension)
-        ]
+        for vector in vectors:
+            self._validate_vector(vector)
 
-        return self._normalize(vector)
-
-    def _normalize(self, vector: list[float]) -> list[float]:
-        """Normalize vector length to 1.0.
-
-        归一化后，向量长度为 1。
-        后续做余弦相似度时会更稳定。
-        """
-        # 计算向量的 L2 长度。
-        length = sqrt(sum(value * value for value in vector))
-        if length == 0:
-            return vector
-
-        # 每个分量除以向量长度。
-        # round(..., 8) 是为了让返回 JSON 不至于太长。
-        return [round(value / length, 8) for value in vector]
+    def _validate_vector(self, vector: list[float]) -> None:
+        """校验单个向量维度。"""
+        if len(vector) != self._settings.embedding_dimension:
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    "Embedding dimension mismatch: "
+                    f"expected={self._settings.embedding_dimension}, actual={len(vector)}"
+                ),
+            )

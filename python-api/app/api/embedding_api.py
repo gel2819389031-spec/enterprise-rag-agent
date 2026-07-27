@@ -7,23 +7,27 @@
 - 返回统一响应 ApiResult。
 """
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 from app.core.response import ApiResult
 from app.schemas.embedding_schema import EmbeddingData, EmbeddingRequest
 from app.services.embedding_service import EmbeddingService
+from functools import lru_cache
 
 # prefix="/api" 表示本文件下所有接口都会带 /api 前缀。
 # tags=["embedding"] 用于 Swagger 文档分组。
 router = APIRouter(prefix="/api", tags=["embedding"])
 
-# 第一版先手动创建 Service。
-# 后续项目复杂后，可以引入 FastAPI Depends 做依赖注入。
-embedding_service = EmbeddingService()
+
+
+@lru_cache
+def get_embedding_service() -> EmbeddingService:
+    """获取 EmbeddingService 单例。"""
+    return EmbeddingService()
 
 
 @router.post("/embeddings")
-def create_embeddings(request: EmbeddingRequest) -> ApiResult[EmbeddingData]:
+def create_embeddings(request: EmbeddingRequest,embedding_service: EmbeddingService = Depends(get_embedding_service)) -> ApiResult[EmbeddingData]:
     """Create embeddings for a list of texts.
 
     请求路径：POST /api/embeddings
