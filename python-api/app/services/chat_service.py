@@ -7,6 +7,7 @@ from app.config import get_settings
 from app.context.context_packer import ContextPacker
 from app.factories.chat_model_factory import get_chat_model
 from app.resolver.conversation_query_resolver import ConversationQueryResolver
+from app.retriever.hybrid_retriever import HybridRetriever
 from app.retriever.pgvector_retriever import PgVectorRetriever
 from app.rewriter.retrieval_query_rewriter import RetrievalQueryRewriter
 from app.router.knowledge_base_selector import KnowledgeBaseSelector
@@ -36,8 +37,8 @@ class ChatService:
         # 将独立问题改写为适合检索的查询。
         self._retrieval_query_rewriter = RetrievalQueryRewriter(chat_model)
 
-        # 调用 pgvector 完成向量检索。
-        self._retriever = PgVectorRetriever()
+        # 编排向量检索、关键词检索和 RRF 融合。
+        self._retriever = HybridRetriever()
 
         # 将多个文档分片压缩到模型上下文限制内。
         self._context_packer = ContextPacker()
@@ -56,6 +57,7 @@ class ChatService:
             question=request.question,
             history=request.history,
         )
+        print(resolved_query)
         # 第二步：判断当前问题是否需要进入 RAG。
         route = self._query_router.route(
             query=resolved_query.standalone_query,
@@ -94,13 +96,14 @@ class ChatService:
                 resolved_query.standalone_query
             )
             print(retrieval_query)
-            # 第五步：在租户和知识库范围内查询文档分片。
+            # 执行向量检索、关键词检索及 RRF 融合。
             documents = self._retriever.retrieve(
-                question=retrieval_query.semantic_query,
+                semantic_query=retrieval_query.semantic_query,
+                keywords=retrieval_query.keywords,
                 tenant_id=request.tenant_id,
                 knowledge_base_id=selected_knowledge_base_id,
-
             )
+
             # 第六步：将检索结果组装成模型上下文。
             context = self._context_packer.pack(documents)
 
@@ -149,10 +152,16 @@ class ChatService:
                     "documentId": metadata.get("document_id"),
                     "documentName": metadata.get("document_name"),
                     "chunkIndex": metadata.get("chunk_index"),
-                    "score": metadata.get("score"),
+                    "score": metadata.get("fusion_score"),
+                    "vectorScore": metadata.get("vector_score"),
+                    "keywordScore": metadata.get("keyword_score"),
+                    "vectorRank": metadata.get("vector_rank"),
+                    "keywordRank": metadata.get("keyword_rank"),
+                    "retrievalSources": metadata.get("retrieval_sources", []),
                     "content": document.page_content,
                 }
             )
+
         return citations
     def _validate_request(self, request: ChatRequest) -> None:
         """Validate the chat request."""

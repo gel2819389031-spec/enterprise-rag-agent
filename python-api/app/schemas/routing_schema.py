@@ -44,10 +44,17 @@ class KnowledgeBaseSelection(BaseModel):
         description="需要用户选择时返回的候选知识库。",
     )
 class RetrievalQuery(BaseModel):
-    """面向检索优化后的查询。"""
-    semantic_query: str = Field(..., description="用于向量化和向量检索的语义查询。")
-    keywords: list[str] = Field(default_factory=list, description="用于 BM25 的关键词。")
+    """面向混合检索优化后的查询。"""
+
+    semantic_query: str = Field(
+        ...,
+        description="用于生成 Embedding 和向量检索的语义查询。",
+    )
+    keywords: list[str] = Field(
+        default_factory=list,
+        description="用于 PostgreSQL 精确关键词检索的关键词。",
+    )
     alternative_queries: list[str] = Field(
         default_factory=list,
-        description="用于后续多查询召回的扩展问题。",
+        description="后续多查询召回使用的扩展问题。",
     )

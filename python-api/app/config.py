@@ -52,8 +52,15 @@ class Settings:
     # RAG
     rag_top_k: int
     rag_max_context_chars: int
+    # 混合检索配置。
+    retrieval_vector_top_k: int
+    retrieval_keyword_top_k: int
+    retrieval_final_top_k: int
+    retrieval_rrf_k: int
+    retrieval_enable_keyword: bool
 
     java_api_base_url: str
+
 
 
 @lru_cache
@@ -89,5 +96,21 @@ def get_settings() -> Settings:
         postgres_password=os.getenv("POSTGRES_PASSWORD", ""),
         rag_top_k=int(os.getenv("RAG_TOP_K", "5")),
         rag_max_context_chars=int(os.getenv("RAG_MAX_CONTEXT_CHARS", "6000")),
+        retrieval_vector_top_k=int(
+            os.getenv("RETRIEVAL_VECTOR_TOP_K", "30")
+        ),
+        retrieval_keyword_top_k=int(
+            os.getenv("RETRIEVAL_KEYWORD_TOP_K", "30")
+        ),
+        retrieval_final_top_k=int(
+            os.getenv("RETRIEVAL_FINAL_TOP_K", "8")
+        ),
+        retrieval_rrf_k=int(
+            os.getenv("RETRIEVAL_RRF_K", "60")
+        ),
+        retrieval_enable_keyword=(
+                os.getenv("RETRIEVAL_ENABLE_KEYWORD", "true").lower()
+                == "true"
+        ),
         java_api_base_url=os.getenv("JAVA_API_BASE_URL", "http://localhost:8123"),
     )
