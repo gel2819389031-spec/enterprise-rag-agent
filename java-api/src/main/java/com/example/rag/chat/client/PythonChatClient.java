@@ -34,9 +34,12 @@ public class PythonChatClient {
     private final EmbeddingClientProperties properties;
     private final ObjectMapper objectMapper;
 
-    public PythonChatData chat(String question, String model, List<PythonChatHistoryMessage> history) {
+    public PythonChatData chat(Long tenantId,
+                               Long knowledgeBaseId,String question, String model, List<PythonChatHistoryMessage> history) {
         try{
             PythonChatRequest requestBody = new PythonChatRequest();
+            requestBody.setTenantId(tenantId);
+            requestBody.setKnowledgeBaseId(knowledgeBaseId);
             requestBody.setQuestion(question);
             requestBody.setModel(model);
             requestBody.setHistory(history);

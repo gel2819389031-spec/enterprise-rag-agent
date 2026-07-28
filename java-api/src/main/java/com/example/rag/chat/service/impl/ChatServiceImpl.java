@@ -19,6 +19,8 @@ import com.example.rag.common.context.UserContext;
 import com.example.rag.common.error.BaseErrorCode;
 import com.example.rag.common.error.ClientException;
 import com.example.rag.common.id.IdGenerator;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -40,10 +42,11 @@ public class ChatServiceImpl implements ChatService {
     private final ChatConversationMapper conversationMapper;
     private final ChatMessageMapper messageMapper;
     private final IdGenerator idGenerator;
+    private final ObjectMapper objectMapper;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public ChatResponse chat(ChatRequest request) {
+    public ChatResponse chat(ChatRequest request) throws JsonProcessingException {
         // 校验用户问题，避免空问题进入会话和模型链路。
         validateRequest(request);
 
@@ -70,14 +73,24 @@ public class ChatServiceImpl implements ChatService {
                 .toList();
 
         // 调用 Python Chat 服务，Python 会使用 history 生成多轮回答。
-        PythonChatData data = pythonChatClient.chat(request.getQuestion(), request.getModel(), history);
+        PythonChatData data = pythonChatClient.chat(
+                tenantId,
+                conversation.getKnowledgeBaseId(),
+                request.getQuestion(),
+                request.getModel(),
+                history
+        );
 
+        String citationsJson = objectMapper.writeValueAsString(
+                data.getCitations() == null ? List.of() : data.getCitations()
+        );
         // 保存助手回答消息，保证前端刷新后仍能查看完整对话。
         ChatMessage assistantMessage = saveAssistantMessage(
                 conversation.getId(),
                 tenantId,
                 userMessage.getId(),
-                data.getAnswer()
+                data.getAnswer(),
+                citationsJson
         );
 
         // 返回前端展示和继续追问所需的会话、消息与回答信息。
@@ -89,6 +102,7 @@ public class ChatServiceImpl implements ChatService {
                 .answer(data.getAnswer())
                 .model(data.getModel())
                 .mode(data.getMode())
+                .citations(data.getCitations())
                 .build();
     }
 
@@ -187,7 +201,8 @@ public class ChatServiceImpl implements ChatService {
     private ChatMessage saveAssistantMessage(Long conversationId,
                                              Long tenantId,
                                              Long parentMessageId,
-                                             String answer) {
+                                             String answer,
+                                             String citations) {
         ChatMessage message = ChatMessage.builder()
                 .id(idGenerator.nextId())
                 .tenantId(tenantId)
@@ -195,8 +210,7 @@ public class ChatServiceImpl implements ChatService {
                 .parentMessageId(parentMessageId)
                 .role("ASSISTANT")
                 .content(answer)
-                .citations("[]")
-                .tokenUsage("{}")
+                .citations(citations)                .tokenUsage("{}")
                 .build();
 
         messageMapper.insert(message);

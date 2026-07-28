@@ -8,6 +8,7 @@ import com.example.rag.chat.entity.ChatMessage;
 import com.example.rag.chat.service.ChatService;
 import com.example.rag.common.api.ApiResult;
 import com.example.rag.common.api.PageResult;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -34,7 +35,7 @@ public class ChatController {
      * 用户提问并返回回答。
      */
     @PostMapping("/completions")
-    public ApiResult<ChatResponse> chat(@RequestBody ChatRequest request) {
+    public ApiResult<ChatResponse> chat(@RequestBody ChatRequest request) throws JsonProcessingException {
         return ApiResult.ok(chatService.chat(request));
     }
 
@@ -42,10 +43,10 @@ public class ChatController {
      * 分页查询当前用户可见的会话列表。
      */
     @GetMapping("/conversations")
-    public ApiResult<PageResult<ChatConversation>> pageConversations(@RequestParam(required = false) String keyword,
-                                                                     @RequestParam(required = false) Long knowledgeBaseId,
-                                                                     @RequestParam(defaultValue = "1") Long pageNo,
-                                                                     @RequestParam(defaultValue = "20") Long pageSize) {
+    public ApiResult<PageResult<ChatConversation>> pageConversations(@RequestParam(value = "keyword", required = false) String keyword,
+                                                                     @RequestParam(value = "knowledgeBaseId", required = false) Long knowledgeBaseId,
+                                                                     @RequestParam(value = "pageNo", defaultValue = "1") Long pageNo,
+                                                                     @RequestParam(value = "pageSize", defaultValue = "20") Long pageSize) {
         ChatConversationQueryRequest request = new ChatConversationQueryRequest();
         request.setKeyword(keyword);
         request.setKnowledgeBaseId(knowledgeBaseId);

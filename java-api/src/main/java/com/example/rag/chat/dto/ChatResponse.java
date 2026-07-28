@@ -3,6 +3,9 @@ package com.example.rag.chat.dto;
 import lombok.Builder;
 import lombok.Data;
 
+import java.util.List;
+import java.util.Map;
+
 /**
  * 用户提问响应。
  */
@@ -23,4 +26,8 @@ public class ChatResponse {
     private String model;
 
     private String mode;
+    /**
+     * RAG 引用来源。
+     */
+    private List<Map<String, Object>> citations;
 }

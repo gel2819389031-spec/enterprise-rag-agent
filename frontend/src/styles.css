@@ -594,15 +594,41 @@ tr:last-child td {
 .chat-bubble {
   max-width: min(760px, 82%);
   border-radius: 18px;
-  line-height: 1.7;
   padding: 13px 16px;
-  white-space: pre-wrap;
 }
 
 .chat-bubble.assistant {
   align-self: flex-start;
   background: #f3f5f8;
   color: #1f2a37;
+}
+
+.bubble-content {
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+.citations {
+  margin-top: 12px;
+  border-top: 1px solid #e0e4ea;
+  padding-top: 10px;
+}
+
+.citations-title {
+  color: #6b7a8d;
+  font-size: 13px;
+  font-weight: 800;
+  margin-bottom: 6px;
+}
+
+.citation-tag {
+  display: inline-block;
+  margin: 3px 6px 3px 0;
+  border-radius: 6px;
+  background: #e8ecf1;
+  color: #3a5068;
+  font-size: 12px;
+  padding: 4px 8px;
 }
 
 .chat-bubble.user {
@@ -637,10 +663,14 @@ tr:last-child td {
 }
 
 .composer-footer {
-  display: grid;
-  grid-template-columns: minmax(0, 230px) 52px;
-  justify-content: end;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
   gap: 12px;
+}
+
+.composer-footer input {
+  max-width: 230px;
 }
 
 .composer-footer input {

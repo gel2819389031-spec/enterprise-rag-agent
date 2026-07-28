@@ -70,6 +70,14 @@ type ChatMessage = {
   id: number;
   role: "USER" | "ASSISTANT" | "SYSTEM" | "TOOL";
   content: string;
+  citations?: string;
+};
+
+type CitationEntry = {
+  chunk_id?: number;
+  document_id?: number;
+  chunk_index?: number;
+  score?: number;
 };
 
 const navItems: NavItem[] = [
@@ -144,6 +152,8 @@ export function App() {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatQuestion, setChatQuestion] = useState("");
   const [chatModel, setChatModel] = useState("");
+  const [chatKnowledgeBaseId, setChatKnowledgeBaseId] = useState("");
+  const [chatMode, setChatMode] = useState<"basic" | "expert" | "kb">("basic");
 
   async function runAction<T>(
     actionName: string,
@@ -205,6 +215,11 @@ export function App() {
       return;
     }
 
+    const knowledgeBaseId =
+      chatMode === "kb" && chatKnowledgeBaseId.trim()
+        ? Number(chatKnowledgeBaseId.trim())
+        : null;
+
     runAction<{ conversationId: number }>(
       "basic-chat",
       () =>
@@ -212,7 +227,12 @@ export function App() {
           baseUrl: javaBaseUrl,
           method: "POST",
           path: "/chat/completions",
-          body: { conversationId: activeConversationId, question, model: chatModel || null },
+          body: {
+            conversationId: activeConversationId,
+            question,
+            model: chatModel || null,
+            knowledgeBaseId,
+          },
         }),
       (_, data) => {
         if (!data) {
@@ -323,18 +343,38 @@ export function App() {
                 <h1>使用快速模式开始对话</h1>
               </div>
               <div className="mode-tabs">
-                <button className="active" type="button">快速模式</button>
-                <button type="button">专家模式</button>
-                <button type="button">知识库模式</button>
+                <button className={chatMode === "basic" ? "active" : ""} onClick={() => setChatMode("basic")} type="button">快速模式</button>
+                <button className={chatMode === "expert" ? "active" : ""} onClick={() => setChatMode("expert")} type="button">专家模式</button>
+                <button className={chatMode === "kb" ? "active" : ""} onClick={() => setChatMode("kb")} type="button">知识库模式</button>
               </div>
             </div>
           ) : (
             <div className="chat-messages">
-              {chatMessages.map((message) => (
-                <div className={message.role === "USER" ? "chat-bubble user" : "chat-bubble assistant"} key={message.id}>
-                  {message.content}
-                </div>
-              ))}
+              {chatMessages.map((message) => {
+                let citations: CitationEntry[] = [];
+                if (message.role === "ASSISTANT" && message.citations) {
+                  try {
+                    citations = JSON.parse(message.citations);
+                  } catch {
+                    // Ignore parse errors for malformed citation JSON.
+                  }
+                }
+                return (
+                  <div className={message.role === "USER" ? "chat-bubble user" : "chat-bubble assistant"} key={message.id}>
+                    <div className="bubble-content">{message.content}</div>
+                    {citations.length > 0 && (
+                      <div className="citations">
+                        <div className="citations-title">引用来源</div>
+                        {citations.map((citation, index) => (
+                          <span className="citation-tag" key={index} title={`相关度: ${citation.score ?? "N/A"}`}>
+                            文档 {citation.document_id ?? "?"} · 切片 {citation.chunk_index ?? "?"}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
 
@@ -356,6 +396,14 @@ export function App() {
                 onChange={(event) => setChatModel(event.target.value)}
                 placeholder="模型名称可空"
               />
+              {chatMode === "kb" && (
+                <input
+                  value={chatKnowledgeBaseId}
+                  onChange={(event) => setChatKnowledgeBaseId(event.target.value)}
+                  placeholder="知识库 ID"
+                  style={{ width: 110 }}
+                />
+              )}
               <button disabled={isLoading("basic-chat")} onClick={sendChatQuestion} type="button">
                 {isLoading("basic-chat") ? <Loader2 className="spin" size={20} /> : <Play size={20} />}
               </button>

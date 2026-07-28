@@ -9,7 +9,8 @@ import java.util.List;
  */
 @Data
 public class PythonChatRequest {
-
+    Long tenantId;
+    Long knowledgeBaseId;
     /**
      * 用户当前问题。
      */

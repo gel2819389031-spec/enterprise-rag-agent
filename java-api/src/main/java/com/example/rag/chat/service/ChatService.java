@@ -6,6 +6,7 @@ import com.example.rag.chat.dto.ChatResponse;
 import com.example.rag.chat.entity.ChatConversation;
 import com.example.rag.chat.entity.ChatMessage;
 import com.example.rag.common.api.PageResult;
+import com.fasterxml.jackson.core.JsonProcessingException;
 
 import java.util.List;
 
@@ -17,7 +18,7 @@ public interface ChatService {
     /**
      * 用户提问，并保存本轮用户消息和助手回答。
      */
-    ChatResponse chat(ChatRequest request);
+    ChatResponse chat(ChatRequest request) throws JsonProcessingException;
 
     /**
      * 分页查询当前租户下的会话列表。
