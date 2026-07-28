@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.rag.chat.client.PythonChatClient;
 import com.example.rag.chat.client.dto.PythonChatData;
 import com.example.rag.chat.client.dto.PythonChatHistoryMessage;
+import com.example.rag.chat.client.dto.PythonChatRequest;
 import com.example.rag.chat.dto.ChatConversationQueryRequest;
 import com.example.rag.chat.dto.ChatRequest;
 import com.example.rag.chat.dto.ChatResponse;
@@ -54,6 +55,7 @@ public class ChatServiceImpl implements ChatService {
         LoginUser loginUser = UserContext.requireUser();
         Long tenantId = parseLong(loginUser.tenantId(), "租户 ID 必须是数字");
         Long userId = parseLong(loginUser.userId(), "用户 ID 必须是数字");
+        PythonChatRequest pythonRequest=new PythonChatRequest();
 
         // 获取已有会话，或者为本次提问创建新会话。
         ChatConversation conversation = getOrCreateConversation(request, tenantId, userId);
@@ -71,38 +73,66 @@ public class ChatServiceImpl implements ChatService {
                         .content(message.getContent())
                         .build())
                 .toList();
+        // 设置当前用户的原始问题。
+        pythonRequest.setQuestion(request.getQuestion());
+
+        // 设置用户本次选择的模型。
+        pythonRequest.setModel(request.getModel());
+
+        // 从用户上下文设置租户 ID，不能使用前端伪造值。
+        pythonRequest.setTenantId(tenantId);
+
+        // 从用户上下文设置当前用户 ID。
+        pythonRequest.setUserId(userId);
+
+        // 设置当前已经创建或查询到的会话 ID。
+        pythonRequest.setConversationId(conversation.getId());
+
+        // 设置用户明确选择的知识库 ID。
+        pythonRequest.setKnowledgeBaseId(request.getKnowledgeBaseId());
+
+        // 设置从数据库加载并转换后的会话历史。
+        pythonRequest.setHistory(history);
 
         // 调用 Python Chat 服务，Python 会使用 history 生成多轮回答。
-        PythonChatData data = pythonChatClient.chat(
-                tenantId,
-                conversation.getKnowledgeBaseId(),
-                request.getQuestion(),
-                request.getModel(),
-                history
-        );
+        PythonChatData pythonData  = pythonChatClient.chat(pythonRequest);
 
         String citationsJson = objectMapper.writeValueAsString(
-                data.getCitations() == null ? List.of() : data.getCitations()
+                pythonData .getCitations() == null ? List.of() : pythonData .getCitations()
         );
         // 保存助手回答消息，保证前端刷新后仍能查看完整对话。
         ChatMessage assistantMessage = saveAssistantMessage(
                 conversation.getId(),
                 tenantId,
                 userMessage.getId(),
-                data.getAnswer(),
+                pythonData .getAnswer(),
                 citationsJson
         );
 
         // 返回前端展示和继续追问所需的会话、消息与回答信息。
         return ChatResponse.builder()
+                // 返回当前会话 ID。
                 .conversationId(conversation.getId())
-                .userMessageId(userMessage.getId())
-                .assistantMessageId(assistantMessage.getId())
-                .question(data.getQuestion())
-                .answer(data.getAnswer())
-                .model(data.getModel())
-                .mode(data.getMode())
-                .citations(data.getCitations())
+                // 返回用户原始问题。
+                .question(pythonData.getQuestion())
+                // 返回问题独立化结果。
+                .standaloneQuery(pythonData.getStandaloneQuery())
+                // 返回模型最终回答。
+                .answer(pythonData.getAnswer())
+                // 返回实际模型。
+                .model(pythonData.getModel())
+                // 返回基础问答、RAG 或澄清模式。
+                .mode(pythonData.getMode())
+                // 返回路由识别出的意图。
+                .intent(pythonData.getIntent())
+                // 返回是否执行了知识库检索。
+                .needRag(pythonData.getNeedRag())
+                // 返回实际选中的知识库。
+                .knowledgeBaseId(pythonData.getKnowledgeBaseId())
+                // 返回路由或选择原因。
+                .routeReason(pythonData.getRouteReason())
+                // 返回回答引用的文档分片。
+                .citations(pythonData.getCitations())
                 .build();
     }
 

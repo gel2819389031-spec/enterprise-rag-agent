@@ -34,15 +34,8 @@ public class PythonChatClient {
     private final EmbeddingClientProperties properties;
     private final ObjectMapper objectMapper;
 
-    public PythonChatData chat(Long tenantId,
-                               Long knowledgeBaseId,String question, String model, List<PythonChatHistoryMessage> history) {
+    public PythonChatData chat(PythonChatRequest requestBody) {
         try{
-            PythonChatRequest requestBody = new PythonChatRequest();
-            requestBody.setTenantId(tenantId);
-            requestBody.setKnowledgeBaseId(knowledgeBaseId);
-            requestBody.setQuestion(question);
-            requestBody.setModel(model);
-            requestBody.setHistory(history);
             String json=objectMapper.writeValueAsString(requestBody);
             String url = properties.getPythonBaseUrl() + "/api/chat/completions";
             HttpRequest request = HttpRequest.newBuilder()
