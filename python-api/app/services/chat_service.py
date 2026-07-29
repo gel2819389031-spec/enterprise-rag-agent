@@ -1,7 +1,7 @@
 """Business service for the basic question-answer flow."""
 
 from fastapi import HTTPException
-
+import logging
 from app.clients.llm_client import LlmClient
 from app.config import get_settings
 from app.context.context_packer import ContextPacker
@@ -13,8 +13,9 @@ from app.rewriter.retrieval_query_rewriter import RetrievalQueryRewriter
 from app.router.knowledge_base_selector import KnowledgeBaseSelector
 from app.router.query_router import QueryRouter
 from app.schemas.chat_schema import ChatData, ChatRequest
+from app.services.rerank_service import RerankService
 
-
+logger = logging.getLogger(__name__)
 class ChatService:
     """Create a direct model answer for a user question."""
 
@@ -42,7 +43,8 @@ class ChatService:
 
         # 将多个文档分片压缩到模型上下文限制内。
         self._context_packer = ContextPacker()
-
+        # 对 RRF 候选分片进行 Cross Encoder 精排。
+        self._rerank_service = RerankService()
         # 调用大语言模型生成最终回答。
         self._llm_client = LlmClient()
 
@@ -97,11 +99,28 @@ class ChatService:
             )
             print(retrieval_query)
             # 执行向量检索、关键词检索及 RRF 融合。
-            documents = self._retriever.retrieve(
+            retrieved_documents  = self._retriever.retrieve(
                 semantic_query=retrieval_query.semantic_query,
                 keywords=retrieval_query.keywords,
                 tenant_id=request.tenant_id,
                 knowledge_base_id=selected_knowledge_base_id,
+            )
+            logger.info(
+                "Hybrid retrieval completed, tenant_id=%s, knowledge_base_id=%s, "
+                "candidate_count=%s",
+                request.tenant_id,
+                selected_knowledge_base_id,
+                len(retrieved_documents),
+            )
+            # 使用完整独立问题对候选分片进行精排。
+            documents = self._rerank_service.rerank(
+                query=resolved_query.standalone_query,
+                documents=retrieved_documents,
+            )
+            logger.info(
+                "Rerank completed, candidate_count=%s, final_count=%s",
+                len(retrieved_documents),
+                len(documents),
             )
 
             # 第六步：将检索结果组装成模型上下文。
@@ -152,12 +171,17 @@ class ChatService:
                     "documentId": metadata.get("document_id"),
                     "documentName": metadata.get("document_name"),
                     "chunkIndex": metadata.get("chunk_index"),
-                    "score": metadata.get("fusion_score"),
+                    # RRF 融合信息。
+                    "fusionScore": metadata.get("fusion_score"),
                     "vectorScore": metadata.get("vector_score"),
                     "keywordScore": metadata.get("keyword_score"),
                     "vectorRank": metadata.get("vector_rank"),
                     "keywordRank": metadata.get("keyword_rank"),
                     "retrievalSources": metadata.get("retrieval_sources", []),
+                    # Rerank 精排信息。
+                    "rerankScore": metadata.get("rerank_score"),
+                    "rerankRank": metadata.get("rerank_rank"),
+                    # 引用分片原文。
                     "content": document.page_content,
                 }
             )

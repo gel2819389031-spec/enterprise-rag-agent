@@ -92,7 +92,7 @@ class HybridRetriever:
         fused_candidates = self._rrf_fusion.fuse(
             vector_candidates=vector_candidates,
             keyword_candidates=keyword_candidates,
-            final_top_k=self._settings.retrieval_final_top_k,
+            final_top_k=self._settings.retrieval_fusion_top_k,
         )
 
         # 转换为现有 ContextPacker 支持的 Document。

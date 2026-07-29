@@ -59,7 +59,20 @@ class Settings:
     retrieval_rrf_k: int
     retrieval_enable_keyword: bool
 
+    # Rerank 精排配置。
+    retrieval_fusion_top_k: int
+    rerank_enabled: bool
+    rerank_provider: str
+    rerank_base_url: str
+    rerank_api_key: str
+    rerank_model: str
+    rerank_candidate_top_k: int
+    rerank_final_top_k: int
+    rerank_max_document_chars: int
+    rerank_timeout_seconds: int
+
     java_api_base_url: str
+
 
 
 
@@ -111,6 +124,41 @@ def get_settings() -> Settings:
         retrieval_enable_keyword=(
                 os.getenv("RETRIEVAL_ENABLE_KEYWORD", "true").lower()
                 == "true"
+        ),
+        retrieval_fusion_top_k=int(
+            os.getenv("RETRIEVAL_FUSION_TOP_K", "20")
+        ),
+
+        rerank_enabled=(
+                os.getenv("RERANK_ENABLED", "true").lower() == "true"
+        ),
+        rerank_provider=os.getenv(
+            "RERANK_PROVIDER",
+            "dashscope_qwen3",
+        ),
+        rerank_base_url=os.getenv(
+            "RERANK_BASE_URL",
+            "",
+        ),
+        rerank_api_key=os.getenv(
+            "RERANK_API_KEY",
+            os.getenv("LLM_API_KEY", ""),
+        ),
+        rerank_model=os.getenv(
+            "RERANK_MODEL",
+            "qwen3-rerank",
+        ),
+        rerank_candidate_top_k=int(
+            os.getenv("RERANK_CANDIDATE_TOP_K", "20")
+        ),
+        rerank_final_top_k=int(
+            os.getenv("RERANK_FINAL_TOP_K", "8")
+        ),
+        rerank_max_document_chars=int(
+            os.getenv("RERANK_MAX_DOCUMENT_CHARS", "6000")
+        ),
+        rerank_timeout_seconds=int(
+            os.getenv("RERANK_TIMEOUT_SECONDS", "30")
         ),
         java_api_base_url=os.getenv("JAVA_API_BASE_URL", "http://localhost:8123"),
     )
