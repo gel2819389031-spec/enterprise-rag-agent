@@ -1,185 +1,790 @@
-"""Business service for the basic question-answer flow."""
+"""聊天业务服务。
+
+负责组织：
+问题独立化 -> 意图路由 -> 知识库选择 -> 查询改写 ->
+混合检索 -> 重排序 -> 上下文组装 -> LLM -> 回答后处理。
+"""
+
+import logging
+from collections.abc import Iterator
+from dataclasses import dataclass, field
+from typing import Any
 
 from fastapi import HTTPException
-import logging
+from langchain_core.documents import Document
+
 from app.clients.llm_client import LlmClient
 from app.config import get_settings
 from app.context.context_packer import ContextPacker
 from app.factories.chat_model_factory import get_chat_model
-from app.resolver.conversation_query_resolver import ConversationQueryResolver
+from app.postprocessors.answer_postprocessor import AnswerPostProcessor
+from app.resolver.conversation_query_resolver import (
+    ConversationQueryResolver,
+)
 from app.retriever.hybrid_retriever import HybridRetriever
-from app.retriever.pgvector_retriever import PgVectorRetriever
-from app.rewriter.retrieval_query_rewriter import RetrievalQueryRewriter
-from app.router.knowledge_base_selector import KnowledgeBaseSelector
+from app.rewriter.retrieval_query_rewriter import (
+    RetrievalQueryRewriter,
+)
+from app.router.knowledge_base_selector import (
+    KnowledgeBaseSelector,
+)
 from app.router.query_router import QueryRouter
-from app.schemas.chat_schema import ChatData, ChatRequest
+from app.schemas.answer_schema import (
+    AnswerPostProcessResult,
+    AnswerStatus,
+)
+from app.schemas.chat_schema import (
+    ChatData,
+    ChatHistoryMessage,
+    ChatRequest,
+)
+from app.schemas.trace_schema import TokenUsage
 from app.services.rerank_service import RerankService
+from app.streaming.sse_encoder import SseEncoder
+from app.trace.trace_recorder import TraceRecorder
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ChatExecutionContext:
+    """LLM 生成前准备完成后的内部数据。"""
+
+    question: str
+    standalone_query: str
+    model: str
+    history: list[ChatHistoryMessage]
+
+    intent: str
+    need_rag: bool
+    route_reason: str | None = None
+    knowledge_base_id: int | None = None
+
+    context: str = ""
+    documents: list[Document] = field(default_factory=list)
+    citations: list[dict[str, Any]] = field(default_factory=list)
+
+    candidate_count: int = 0
+    rerank_count: int = 0
+    context_document_count: int = 0
+
+    no_evidence: bool = False
+    clarification_answer: str | None = None
+
+
 class ChatService:
-    """Create a direct model answer for a user question."""
+    """执行普通聊天和 RAG 问答流程。"""
 
     def __init__(self) -> None:
-        """初始化 ChatService 所依赖的组件。"""
+        """初始化聊天流程依赖。"""
         self._settings = get_settings()
 
-        # 复用同一个 LangChain ChatModel。
+        # 复用同一个 LangChain 聊天模型。
         chat_model = get_chat_model()
 
-        # 将多轮追问转换为独立问题。
-        self._query_resolver = ConversationQueryResolver(chat_model)
+        # 将多轮追问转换成独立问题。
+        self._query_resolver = ConversationQueryResolver(
+            chat_model
+        )
 
         # 判断问题是否需要进入 RAG。
         self._query_router = QueryRouter()
 
-        # 确定本次查询使用的知识库。
-        self._knowledge_base_selector = KnowledgeBaseSelector()
+        # 在当前租户范围内选择知识库。
+        self._knowledge_base_selector = (
+            KnowledgeBaseSelector()
+        )
 
-        # 将独立问题改写为适合检索的查询。
-        self._retrieval_query_rewriter = RetrievalQueryRewriter(chat_model)
+        # 将独立问题改写为检索查询。
+        self._retrieval_query_rewriter = (
+            RetrievalQueryRewriter(chat_model)
+        )
 
-        # 编排向量检索、关键词检索和 RRF 融合。
+        # 执行向量检索、关键词检索和 RRF 融合。
         self._retriever = HybridRetriever()
 
-        # 将多个文档分片压缩到模型上下文限制内。
-        self._context_packer = ContextPacker()
-        # 对 RRF 候选分片进行 Cross Encoder 精排。
+        # 对候选分片进行 Cross Encoder 重排序。
         self._rerank_service = RerankService()
-        # 调用大语言模型生成最终回答。
+
+        # 将重排序结果打包成模型上下文。
+        self._context_packer = ContextPacker()
+
+        # 调用大模型生成回答。
         self._llm_client = LlmClient()
 
-    def answer(self, request: ChatRequest) -> ChatData:
-        """执行完整的基础 RAG 路由流程。"""
-        # Validate request before calling the model.
-        self._validate_request(request)
-        # Use request model if present, otherwise use configured default model.
-        model = request.model or self._settings.llm_model
-        # 第一步：将依赖历史的追问转换为独立问题。
-        resolved_query = self._query_resolver.resolve(
-            question=request.question,
-            history=request.history,
-        )
-        print(resolved_query)
-        # 第二步：判断当前问题是否需要进入 RAG。
-        route = self._query_router.route(
-            query=resolved_query.standalone_query,
-            history=request.history,
-            preferred_knowledge_base_id=request.knowledge_base_id,
-        )
-        selected_knowledge_base_id: int | None = None
-        context = ""
-        citations = []
-        # 第三步：只有 RAG 问题才选择知识库并执行检索。
-        if route.need_rag:
-            selection = self._knowledge_base_selector.select(
-                tenant_id=request.tenant_id,
-                user_id=request.user_id,
-                preferred_knowledge_base_id=request.knowledge_base_id,
-                query=resolved_query.standalone_query,
-            )
-            # 当前无法可靠选择知识库时，直接返回澄清信息。
-            if selection.need_clarification:
-                return ChatData(
-                    question=request.question,
-                    standalone_query=resolved_query.standalone_query,
-                    answer=self._build_clarification_answer(selection),
-                    model=model,
-                    mode="clarify",
-                    intent="CLARIFY",
-                    need_rag=False,
-                    knowledge_base_id=None,
-                    route_reason=selection.reason,
-                    citations=[],
-                )
-            selected_knowledge_base_id = selection.knowledge_base_id
+        # 校验引用并清理最终回答。
+        self._answer_postprocessor = AnswerPostProcessor()
 
-            # 第四步：生成适合向量检索的查询。
-            retrieval_query = self._retrieval_query_rewriter.rewrite(
-                resolved_query.standalone_query
+        # 将流式事件编码为 SSE 文本。
+        self._sse_encoder = SseEncoder()
+
+    def answer(self, request: ChatRequest) -> ChatData:
+        """执行同步聊天流程。"""
+        self._validate_request(request)
+
+        recorder = self._create_recorder(request)
+
+        try:
+            # 执行调用 LLM 前的公共流程。
+            execution = self._prepare_execution(
+                request=request,
+                recorder=recorder,
             )
-            print(retrieval_query)
-            # 执行向量检索、关键词检索及 RRF 融合。
-            retrieved_documents  = self._retriever.retrieve(
-                semantic_query=retrieval_query.semantic_query,
+
+            # 需要用户选择知识库时直接返回澄清回答。
+            if execution.clarification_answer is not None:
+                raw_answer = execution.clarification_answer
+                token_usage = TokenUsage()
+
+                processed = AnswerPostProcessResult(
+                    answer=raw_answer,
+                    answer_status=(
+                        AnswerStatus.CLARIFICATION_REQUIRED
+                    ),
+                )
+
+            # RAG 未检索到有效依据时，不调用模型。
+            elif execution.no_evidence:
+                raw_answer = (
+                    self._settings.rag_empty_context_message
+                )
+                token_usage = TokenUsage()
+
+                processed = self._postprocess_answer(
+                    raw_answer=raw_answer,
+                    execution=execution,
+                    recorder=recorder,
+                )
+
+            else:
+                # 调用模型生成完整回答。
+                with recorder.node(
+                    "LLM_GENERATE",
+                    {
+                        "model": execution.model,
+                        "streaming": False,
+                    },
+                ) as node:
+                    llm_result = self._llm_client.chat(
+                        question=execution.standalone_query,
+                        model=execution.model,
+                        history=execution.history,
+                        context=execution.context,
+                        rag_mode=execution.need_rag,
+                    )
+
+                    raw_answer = llm_result.answer
+                    token_usage = llm_result.token_usage
+
+                    node.set_output(
+                        {
+                            "answerChars": len(raw_answer),
+                            "inputTokens": (
+                                token_usage.input_tokens
+                            ),
+                            "outputTokens": (
+                                token_usage.output_tokens
+                            ),
+                            "totalTokens": (
+                                token_usage.total_tokens
+                            ),
+                        }
+                    )
+
+                # 对完整模型回答进行引用检查。
+                processed = self._postprocess_answer(
+                    raw_answer=raw_answer,
+                    execution=execution,
+                    recorder=recorder,
+                )
+
+            # 完成整条 Trace。
+            trace = recorder.finish(
+                output_summary=self._build_trace_output(
+                    execution=execution,
+                    processed=processed,
+                ),
+                token_usage=token_usage,
+            )
+
+            # 组装同步接口响应。
+            return self._build_chat_data(
+                request=request,
+                execution=execution,
+                processed=processed,
+                token_usage=token_usage,
+                trace=trace,
+            )
+
+        except Exception as exception:
+            recorder.fail(exception)
+
+            logger.exception(
+                "Chat failed, trace_id=%s",
+                request.trace_id,
+            )
+            raise
+
+    def stream_answer(
+        self,
+        request: ChatRequest,
+    ) -> Iterator[str]:
+        """执行聊天流程并返回 SSE 事件流。"""
+        self._validate_request(request)
+
+        recorder = self._create_recorder(request)
+
+        try:
+            # 通知 Java：Python 已开始处理请求。
+            yield self._sse_encoder.start(
+                trace_id=request.trace_id,
+                conversation_id=request.conversation_id,
+            )
+
+            # 执行路由、检索、重排和上下文打包。
+            execution = self._prepare_execution(
+                request=request,
+                recorder=recorder,
+            )
+
+            # 返回路由结果。
+            yield self._sse_encoder.route(
+                intent=execution.intent,
+                need_rag=execution.need_rag,
+                knowledge_base_id=(
+                    execution.knowledge_base_id
+                ),
+            )
+
+            # RAG 模式下返回检索阶段统计。
+            if execution.need_rag:
+                yield self._sse_encoder.retrieval(
+                    candidate_count=(
+                        execution.candidate_count
+                    ),
+                    rerank_count=execution.rerank_count,
+                    context_document_count=(
+                        execution.context_document_count
+                    ),
+                )
+
+            # 需要用户选择知识库时，不调用 LLM。
+            if execution.clarification_answer is not None:
+                raw_answer = execution.clarification_answer
+                token_usage = TokenUsage()
+
+                processed = AnswerPostProcessResult(
+                    answer=raw_answer,
+                    answer_status=(
+                        AnswerStatus.CLARIFICATION_REQUIRED
+                    ),
+                )
+
+            # 没有检索依据时，不调用 LLM。
+            elif execution.no_evidence:
+                raw_answer = (
+                    self._settings.rag_empty_context_message
+                )
+                token_usage = TokenUsage()
+
+                processed = self._postprocess_answer(
+                    raw_answer=raw_answer,
+                    execution=execution,
+                    recorder=recorder,
+                )
+
+            else:
+                answer_parts: list[str] = []
+                token_usage = TokenUsage()
+
+                with recorder.node(
+                    "LLM_GENERATE",
+                    {
+                        "model": execution.model,
+                        "streaming": True,
+                    },
+                ) as node:
+                    # 持续读取 LangChain 模型分片。
+                    for chunk in self._llm_client.stream_chat(
+                        question=execution.standalone_query,
+                        model=execution.model,
+                        history=execution.history,
+                        context=execution.context,
+                        rag_mode=execution.need_rag,
+                    ):
+                        # 文本分片立即发送给 Java。
+                        if chunk.content:
+                            answer_parts.append(chunk.content)
+
+                            yield self._sse_encoder.delta(
+                                content=chunk.content
+                            )
+
+                        # 最后一个分片可能包含 Token 用量。
+                        if chunk.token_usage.total_tokens > 0:
+                            token_usage = chunk.token_usage
+
+                    # 拼接完整原始答案。
+                    raw_answer = "".join(answer_parts)
+
+                    node.set_output(
+                        {
+                            "answerChars": len(raw_answer),
+                            "inputTokens": (
+                                token_usage.input_tokens
+                            ),
+                            "outputTokens": (
+                                token_usage.output_tokens
+                            ),
+                            "totalTokens": (
+                                token_usage.total_tokens
+                            ),
+                        }
+                    )
+
+                # 流结束后统一校验引用。
+                processed = self._postprocess_answer(
+                    raw_answer=raw_answer,
+                    execution=execution,
+                    recorder=recorder,
+                )
+
+            # 正常完成 Trace。
+            trace = recorder.finish(
+                output_summary=self._build_trace_output(
+                    execution=execution,
+                    processed=processed,
+                ),
+                token_usage=token_usage,
+            )
+
+            # final 是 Java 应持久化的最终权威结果。
+            chat_data = self._build_chat_data(
+                request=request,
+                execution=execution,
+                processed=processed,
+                token_usage=token_usage,
+                trace=trace,
+            )
+
+            yield self._sse_encoder.final(
+                data=chat_data.model_dump(
+                    by_alias=True,
+                    mode="json",
+                )
+            )
+
+            # 通知 Java 流正常结束。
+            yield self._sse_encoder.done(
+                trace_id=request.trace_id
+            )
+
+        except GeneratorExit:
+            # Java 或前端断开连接。
+            recorder.fail(
+                RuntimeError("SSE client disconnected")
+            )
+
+            logger.warning(
+                "SSE client disconnected, trace_id=%s",
+                request.trace_id,
+            )
+            raise
+
+        except Exception as exception:
+            # SSE 建立后不能再修改 HTTP 状态码。
+            recorder.fail(exception)
+
+            logger.exception(
+                "Streaming chat failed, trace_id=%s",
+                request.trace_id,
+            )
+
+            yield self._sse_encoder.error(
+                code="CHAT_STREAM_FAILED",
+                message=str(exception),
+                trace_id=request.trace_id,
+            )
+
+            yield self._sse_encoder.done(
+                trace_id=request.trace_id
+            )
+
+    def _prepare_execution(
+        self,
+        request: ChatRequest,
+        recorder: TraceRecorder,
+    ) -> ChatExecutionContext:
+        """执行 LLM 生成前的公共流程。"""
+        model = request.model or self._settings.llm_model
+
+        # 将依赖历史的问题转换成独立问题。
+        with recorder.node(
+            "QUERY_RESOLVE",
+            {
+                "historyCount": len(request.history),
+            },
+        ) as node:
+            resolved_query = self._query_resolver.resolve(
+                question=request.question,
+                history=request.history,
+            )
+
+            node.set_output(
+                {
+                    "rewritten": resolved_query.rewritten,
+                    "standaloneQuery": (
+                        resolved_query.standalone_query[:1000]
+                    ),
+                }
+            )
+
+        # 判断当前问题是否需要使用 RAG。
+        with recorder.node("QUERY_ROUTE") as node:
+            route = self._query_router.route(
+                query=resolved_query.standalone_query,
+                history=request.history,
+                preferred_knowledge_base_id=(
+                    request.knowledge_base_id
+                ),
+            )
+
+            node.set_output(
+                {
+                    "intent": route.intent.value,
+                    "needRag": route.need_rag,
+                    "confidence": route.confidence,
+                    "reason": route.reason,
+                }
+            )
+
+        # 普通对话直接进入 LLM。
+        if not route.need_rag:
+            return ChatExecutionContext(
+                question=request.question,
+                standalone_query=(
+                    resolved_query.standalone_query
+                ),
+                model=model,
+                history=request.history,
+                intent=route.intent.value,
+                need_rag=False,
+                route_reason=route.reason,
+            )
+
+        # 在当前租户允许访问的范围内选择知识库。
+        with recorder.node(
+            "KNOWLEDGE_BASE_SELECT"
+        ) as node:
+            selection = (
+                self._knowledge_base_selector.select(
+                    tenant_id=request.tenant_id,
+                    user_id=request.user_id,
+                    preferred_knowledge_base_id=(
+                        request.knowledge_base_id
+                    ),
+                    query=resolved_query.standalone_query,
+                )
+            )
+
+            node.set_output(
+                {
+                    "knowledgeBaseId": (
+                        selection.knowledge_base_id
+                    ),
+                    "selectionType": (
+                        selection.selection_type
+                    ),
+                    "needClarification": (
+                        selection.need_clarification
+                    ),
+                }
+            )
+
+        # 无法确定知识库时返回澄清响应。
+        if selection.need_clarification:
+            return ChatExecutionContext(
+                question=request.question,
+                standalone_query=(
+                    resolved_query.standalone_query
+                ),
+                model=model,
+                history=request.history,
+                intent="CLARIFY",
+                need_rag=False,
+                route_reason=selection.reason,
+                clarification_answer=(
+                    self._build_clarification_answer(
+                        selection
+                    )
+                ),
+            )
+
+        selected_knowledge_base_id = (
+            selection.knowledge_base_id
+        )
+
+        # 生成语义查询和关键词。
+        with recorder.node(
+            "RETRIEVAL_QUERY_REWRITE"
+        ) as node:
+            retrieval_query = (
+                self._retrieval_query_rewriter.rewrite(
+                    resolved_query.standalone_query
+                )
+            )
+
+            node.set_output(
+                {
+                    "semanticQuery": (
+                        retrieval_query.semantic_query[:1000]
+                    ),
+                    "keywords": retrieval_query.keywords,
+                }
+            )
+
+        # 执行混合检索和 RRF 融合。
+        with recorder.node(
+            "HYBRID_RETRIEVE"
+        ) as node:
+            retrieved_documents = self._retriever.retrieve(
+                semantic_query=(
+                    retrieval_query.semantic_query
+                ),
                 keywords=retrieval_query.keywords,
                 tenant_id=request.tenant_id,
-                knowledge_base_id=selected_knowledge_base_id,
-            )
-            logger.info(
-                "Hybrid retrieval completed, tenant_id=%s, knowledge_base_id=%s, "
-                "candidate_count=%s",
-                request.tenant_id,
-                selected_knowledge_base_id,
-                len(retrieved_documents),
-            )
-            # 使用完整独立问题对候选分片进行精排。
-            documents = self._rerank_service.rerank(
-                query=resolved_query.standalone_query,
-                documents=retrieved_documents,
-            )
-            logger.info(
-                "Rerank completed, candidate_count=%s, final_count=%s",
-                len(retrieved_documents),
-                len(documents),
+                knowledge_base_id=(
+                    selected_knowledge_base_id
+                ),
             )
 
-            # 第六步：将检索结果组装成模型上下文。
-            # 打包上下文并获得真正进入 Prompt 的分片。
+            candidate_count = len(retrieved_documents)
+
+            node.set_output(
+                {
+                    "candidateCount": candidate_count,
+                }
+            )
+
+        # 对候选分片进行重排序。
+        with recorder.node("RERANK") as node:
+            reranked_documents = (
+                self._rerank_service.rerank(
+                    query=resolved_query.standalone_query,
+                    documents=retrieved_documents,
+                )
+            )
+
+            rerank_count = len(reranked_documents)
+
+            node.set_output(
+                {
+                    "inputCount": candidate_count,
+                    "resultCount": rerank_count,
+                }
+            )
+
+        # 将重排序结果装入上下文预算。
+        with recorder.node("CONTEXT_PACK") as node:
             packed_context = self._context_packer.pack(
+                reranked_documents
+            )
+
+            documents = packed_context.documents
+            context = packed_context.text
+            citations = self._build_citations(
                 documents
             )
 
-            # 只把打包后的文本发送给 LLM。
-            context = packed_context.text
+            context_document_count = len(documents)
 
-            # 第七步：将文档元数据转换为前端引用信息。
-            citations = self._build_citations( packed_context.documents)
-            logger.info(
-                "Context packing completed, input_count=%s, packed_count=%s, "
-                "total_chars=%s, truncated=%s",
-                len(documents),
-                len(packed_context.documents),
-                packed_context.total_chars,
-                packed_context.truncated,
+            node.set_output(
+                {
+                    "documentCount": (
+                        context_document_count
+                    ),
+                    "totalChars": (
+                        packed_context.total_chars
+                    ),
+                    "truncated": (
+                        packed_context.truncated
+                    ),
+                }
             )
-        # 第八步：普通对话和 RAG 对话统一调用 LLM 生成回答。
-        if route.need_rag and not context.strip():
-            answer = self._settings.rag_empty_context_message
+
+        return ChatExecutionContext(
+            question=request.question,
+            standalone_query=(
+                resolved_query.standalone_query
+            ),
+            model=model,
+            history=request.history,
+            intent=route.intent.value,
+            need_rag=True,
+            route_reason=route.reason,
+            knowledge_base_id=(
+                selected_knowledge_base_id
+            ),
+            context=context,
+            documents=documents,
+            citations=citations,
+            candidate_count=candidate_count,
+            rerank_count=rerank_count,
+            context_document_count=(
+                context_document_count
+            ),
+            no_evidence=not context.strip(),
+        )
+
+    def _postprocess_answer(
+        self,
+        raw_answer: str,
+        execution: ChatExecutionContext,
+        recorder: TraceRecorder,
+    ) -> AnswerPostProcessResult:
+        """清理回答并校验引用编号。"""
+        with recorder.node(
+            "ANSWER_POST_PROCESS"
+        ) as node:
+            processed = (
+                self._answer_postprocessor.process(
+                    answer=raw_answer,
+                    documents=execution.documents,
+                    rag_mode=execution.need_rag,
+                    no_evidence=execution.no_evidence,
+                )
+            )
+
+            node.set_output(
+                {
+                    "answerStatus": (
+                        processed.answer_status.value
+                    ),
+                    "usedCitationIndexes": (
+                        processed.used_citation_indexes
+                    ),
+                    "invalidCitationIndexes": (
+                        processed.invalid_citation_indexes
+                    ),
+                }
+            )
+
+        return processed
+
+    @staticmethod
+    def _build_trace_output(
+        execution: ChatExecutionContext,
+        processed: AnswerPostProcessResult,
+    ) -> dict[str, Any]:
+        """构建 Trace 输出摘要。"""
+        return {
+            "answerStatus": (
+                processed.answer_status.value
+            ),
+            "intent": execution.intent,
+            "needRag": execution.need_rag,
+            "knowledgeBaseId": (
+                execution.knowledge_base_id
+            ),
+            "citationCount": len(
+                execution.citations
+            ),
+        }
+
+    @staticmethod
+    def _build_chat_data(
+        request: ChatRequest,
+        execution: ChatExecutionContext,
+        processed: AnswerPostProcessResult,
+        token_usage: TokenUsage,
+        trace,
+    ) -> ChatData:
+        """构建统一聊天响应对象。"""
+        if execution.clarification_answer is not None:
+            mode = "clarify"
+        elif execution.need_rag:
+            mode = "rag"
         else:
-            answer = self._llm_client.chat(
-                question=resolved_query.standalone_query,
-                model=model,
-                history=request.history,
-                context=context,
-                rag_mode=route.need_rag,
-            )
+            mode = "basic"
 
         return ChatData(
+            trace_id=request.trace_id,
             question=request.question,
-            standalone_query=resolved_query.standalone_query,
-            answer=answer,
-            model=model,
-            mode="rag" if route.need_rag else "basic",
-            intent=route.intent.value,
-            need_rag=route.need_rag,
-            knowledge_base_id=selected_knowledge_base_id,
-            route_reason=route.reason,
-            citations=citations,
+            standalone_query=(
+                execution.standalone_query
+            ),
+            answer=processed.answer,
+            model=execution.model,
+            mode=mode,
+            intent=execution.intent,
+            need_rag=execution.need_rag,
+            knowledge_base_id=(
+                execution.knowledge_base_id
+            ),
+            route_reason=execution.route_reason,
+            citations=execution.citations,
+            answer_status=(
+                processed.answer_status
+            ),
+            used_citation_indexes=(
+                processed.used_citation_indexes
+            ),
+            invalid_citation_indexes=(
+                processed.invalid_citation_indexes
+            ),
+            token_usage=token_usage,
+            trace=trace,
         )
 
     @staticmethod
-    def _build_clarification_answer(selection) -> str:
+    def _create_recorder(
+        request: ChatRequest,
+    ) -> TraceRecorder:
+        """创建当前请求的 TraceRecorder。"""
+        return TraceRecorder(
+            trace_id=request.trace_id,
+            request_id=request.request_id,
+            input_summary={
+                "tenantId": request.tenant_id,
+                "userId": request.user_id,
+                "conversationId": (
+                    request.conversation_id
+                ),
+                "knowledgeBaseId": (
+                    request.knowledge_base_id
+                ),
+                "question": request.question[:1000],
+            },
+        )
+
+    @staticmethod
+    def _build_clarification_answer(
+        selection,
+    ) -> str:
         """生成知识库选择提示。"""
         if not selection.candidates:
             return selection.reason
 
-        names = "、".join(candidate.name for candidate in selection.candidates)
-        return f"{selection.reason} 可选知识库：{names}。"
+        candidates_text = "、".join(
+            (
+                f"{candidate.name}"
+                f"（ID：{candidate.id}）"
+            )
+            for candidate in selection.candidates
+        )
+
+        return (
+            f"{selection.reason}"
+            f" 可选知识库：{candidates_text}。"
+            "请选择一个知识库后重新提问。"
+        )
 
     @staticmethod
-    def _build_citations(documents) -> list[dict]:
-        """从 LangChain Document 中提取引用信息。"""
-        citations: list[dict] = []
+    def _build_citations(
+        documents: list[Document],
+    ) -> list[dict[str, Any]]:
+        """从最终上下文分片中构建引用信息。"""
+        citations: list[dict[str, Any]] = []
 
         for document in documents:
             metadata = document.metadata
@@ -187,31 +792,84 @@ class ChatService:
             citations.append(
                 {
                     "chunkId": metadata.get("chunk_id"),
-                    "documentId": metadata.get("document_id"),
-                    "documentName": metadata.get("document_name"),
-                    "chunkIndex": metadata.get("chunk_index"),
-                    "citationIndex": metadata.get("citation_index"),
+                    "documentId": metadata.get(
+                        "document_id"
+                    ),
+                    "documentName": metadata.get(
+                        "document_name"
+                    ),
+                    "chunkIndex": metadata.get(
+                        "chunk_index"
+                    ),
+                    "citationIndex": metadata.get(
+                        "citation_index"
+                    ),
                     "contextTruncated": metadata.get(
                         "context_truncated",
                         False,
                     ),
-                    # RRF 融合信息。
-                    "fusionScore": metadata.get("fusion_score"),
-                    "vectorScore": metadata.get("vector_score"),
-                    "keywordScore": metadata.get("keyword_score"),
-                    "vectorRank": metadata.get("vector_rank"),
-                    "keywordRank": metadata.get("keyword_rank"),
-                    "retrievalSources": metadata.get("retrieval_sources", []),
-                    # Rerank 精排信息。
-                    "rerankScore": metadata.get("rerank_score"),
-                    "rerankRank": metadata.get("rerank_rank"),
-                    # 引用分片原文。
+                    "fusionScore": metadata.get(
+                        "fusion_score"
+                    ),
+                    "vectorScore": metadata.get(
+                        "vector_score"
+                    ),
+                    "keywordScore": metadata.get(
+                        "keyword_score"
+                    ),
+                    "vectorRank": metadata.get(
+                        "vector_rank"
+                    ),
+                    "keywordRank": metadata.get(
+                        "keyword_rank"
+                    ),
+                    "retrievalSources": metadata.get(
+                        "retrieval_sources",
+                        [],
+                    ),
+                    "rerankScore": metadata.get(
+                        "rerank_score"
+                    ),
+                    "rerankRank": metadata.get(
+                        "rerank_rank"
+                    ),
                     "content": document.page_content,
                 }
             )
 
         return citations
-    def _validate_request(self, request: ChatRequest) -> None:
-        """Validate the chat request."""
-        if request.question is None or not request.question.strip():
-            raise HTTPException(status_code=400, detail="question must not be blank")
+
+    def _validate_request(
+        self,
+        request: ChatRequest,
+    ) -> None:
+        """校验聊天请求。"""
+        if not request.question.strip():
+            raise HTTPException(
+                status_code=400,
+                detail="question must not be blank",
+            )
+
+        if len(request.question) > 10000:
+            raise HTTPException(
+                status_code=400,
+                detail="question length must be <= 10000",
+            )
+
+        if len(request.history) > 100:
+            raise HTTPException(
+                status_code=400,
+                detail="history size must be <= 100",
+            )
+
+        if request.model and (
+            request.model != self._settings.llm_model
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Chat model mismatch: "
+                    f"request={request.model}, "
+                    f"configured={self._settings.llm_model}"
+                ),
+            )

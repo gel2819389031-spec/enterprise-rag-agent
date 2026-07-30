@@ -3,6 +3,9 @@ from typing import Any
 
 from pydantic import BaseModel, Field, ConfigDict
 
+from app.schemas.answer_schema import AnswerStatus
+from app.schemas.trace_schema import TokenUsage, RagTraceData
+
 
 class ChatHistoryMessage(BaseModel):
     """One historical chat message."""
@@ -24,6 +27,17 @@ class ChatRequest(BaseModel):
     model: str | None = Field(default=None, description="本次使用的模型。")
     tenant_id: int | None = Field(default=None, alias="tenantId", description="租户 ID。")
     user_id: int | None = Field(default=None, alias="userId", description="用户 ID。")
+    trace_id: int = Field(
+        ...,
+        alias="traceId",
+        description="Java 生成的 RAG Trace ID。",
+    )
+
+    request_id: str | None = Field(
+        default=None,
+        alias="requestId",
+        description="Java 与 Python 日志关联 ID。",
+    )
     conversation_id: int | None = Field(
         default=None,
         alias="conversationId",
@@ -69,4 +83,40 @@ class ChatData(BaseModel):
     citations: list[dict[str, Any]] = Field(
         default_factory=list,
         description="回答引用的文档分片。",
+    )
+    trace_id: int = Field(
+        ...,
+        alias="traceId",
+    )
+
+    answer_status: AnswerStatus = Field(
+        ...,
+        alias="answerStatus",
+    )
+
+    used_citation_indexes: list[int] = Field(
+        default_factory=list,
+        alias="usedCitationIndexes",
+    )
+
+    invalid_citation_indexes: list[int] = Field(
+        default_factory=list,
+        alias="invalidCitationIndexes",
+    )
+
+    token_usage: TokenUsage = Field(
+        default_factory=TokenUsage,
+        alias="tokenUsage",
+    )
+
+    trace: RagTraceData | None = Field(
+        default=None,
+        description="开发阶段返回的完整 Trace。",
+    )
+class LlmResult(BaseModel):
+    """LLM Client 的统一返回结果。"""
+
+    answer: str
+    token_usage: TokenUsage = Field(
+        default_factory=TokenUsage,
     )

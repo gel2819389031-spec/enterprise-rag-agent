@@ -19,21 +19,27 @@ import com.example.rag.common.context.LoginUser;
 import com.example.rag.common.context.UserContext;
 import com.example.rag.common.error.BaseErrorCode;
 import com.example.rag.common.error.ClientException;
+import com.example.rag.common.error.RemoteException;
 import com.example.rag.common.id.IdGenerator;
+import com.example.rag.trace.service.RagTraceService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Chat 业务服务实现。
  */
 @Service
+@Slf4j
 @RequiredArgsConstructor
 public class ChatServiceImpl implements ChatService {
 
@@ -44,6 +50,7 @@ public class ChatServiceImpl implements ChatService {
     private final ChatMessageMapper messageMapper;
     private final IdGenerator idGenerator;
     private final ObjectMapper objectMapper;
+    private final RagTraceService ragTraceService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -55,6 +62,11 @@ public class ChatServiceImpl implements ChatService {
         LoginUser loginUser = UserContext.requireUser();
         Long tenantId = parseLong(loginUser.tenantId(), "租户 ID 必须是数字");
         Long userId = parseLong(loginUser.userId(), "用户 ID 必须是数字");
+        // 为本次 RAG 请求生成唯一 Trace 主键。
+        Long traceId = idGenerator.nextId();
+
+        // 生成跨 Java 和 Python 日志使用的请求 ID。
+        String requestId = String.valueOf(traceId);
         PythonChatRequest pythonRequest=new PythonChatRequest();
 
         // 获取已有会话，或者为本次提问创建新会话。
@@ -84,6 +96,10 @@ public class ChatServiceImpl implements ChatService {
 
         // 从用户上下文设置当前用户 ID。
         pythonRequest.setUserId(userId);
+        // 将 Trace ID 传给 Python，由 Python 原样返回。
+        pythonRequest.setTraceId(traceId);
+        // 将请求关联 ID 传给 Python。
+        pythonRequest.setRequestId(requestId);
 
         // 设置当前已经创建或查询到的会话 ID。
         pythonRequest.setConversationId(conversation.getId());
@@ -94,29 +110,74 @@ public class ChatServiceImpl implements ChatService {
         // 设置从数据库加载并转换后的会话历史。
         pythonRequest.setHistory(history);
 
-        // 调用 Python Chat 服务，Python 会使用 history 生成多轮回答。
-        PythonChatData pythonData  = pythonChatClient.chat(pythonRequest);
 
-        String citationsJson = objectMapper.writeValueAsString(
-                pythonData .getCitations() == null ? List.of() : pythonData .getCitations()
+        // 调用 Python Chat 服务，Python 会使用 history 生成多轮回答。
+        PythonChatData pythonData;
+        try {
+            // 调用 Python RAG 服务。
+            pythonData = pythonChatClient.chat(
+                    pythonRequest
+            );
+        } catch (Exception exception) {
+            // Python 调用失败时，独立保存失败 Trace。
+            saveFailedTraceSafely(
+                    traceId,
+                    tenantId,
+                    requestId,
+                    conversation.getId(),
+                    request,
+                    exception
+            );
+            // 继续抛出原异常，交给全局异常处理器。
+            throw exception;
+        }
+        // 校验 Python 返回的 Trace ID 与 Java 请求一致。
+        validatePythonTraceId(
+                traceId,
+                pythonData
         );
-        // 保存助手回答消息，保证前端刷新后仍能查看完整对话。
+
+        // 将引用信息转换为 JSONB 字符串。
+        String citationsJson = objectMapper.writeValueAsString(
+                pythonData.getCitations() == null
+                        ? List.of()
+                        : pythonData.getCitations()
+        );
+
+    // 将 Token 用量转换为 JSONB 字符串。
+        String tokenUsageJson = objectMapper.writeValueAsString(
+                pythonData.getTokenUsage() == null
+                        ? Map.of()
+                        : pythonData.getTokenUsage()
+        );
+        // 保存助手消息，并关联本次 RAG Trace。
         ChatMessage assistantMessage = saveAssistantMessage(
                 conversation.getId(),
                 tenantId,
                 userMessage.getId(),
-                pythonData .getAnswer(),
-                citationsJson
+                pythonData.getAnswer(),
+                citationsJson,
+                tokenUsageJson,
+                traceId
+        );
+        // 将 Python 返回的完整 Trace 保存到 rag_trace。
+        ragTraceService.saveSuccessTrace(
+                tenantId,
+                conversation.getId(),
+                assistantMessage.getId(),
+                pythonData.getTrace()
         );
 
         // 返回前端展示和继续追问所需的会话、消息与回答信息。
         return ChatResponse.builder()
                 // 返回当前会话 ID。
                 .conversationId(conversation.getId())
+                .traceId(traceId)
                 // 返回用户原始问题。
                 .question(pythonData.getQuestion())
                 // 返回问题独立化结果。
                 .standaloneQuery(pythonData.getStandaloneQuery())
+                .answerStatus(pythonData.getAnswerStatus())
                 // 返回模型最终回答。
                 .answer(pythonData.getAnswer())
                 // 返回实际模型。
@@ -131,6 +192,9 @@ public class ChatServiceImpl implements ChatService {
                 .knowledgeBaseId(pythonData.getKnowledgeBaseId())
                 // 返回路由或选择原因。
                 .routeReason(pythonData.getRouteReason())
+                .usedCitationIndexes(pythonData.getUsedCitationIndexes())
+                .invalidCitationIndexes(pythonData.getInvalidCitationIndexes())
+                .tokenUsage(pythonData.getTokenUsage())
                 // 返回回答引用的文档分片。
                 .citations(pythonData.getCitations())
                 .build();
@@ -191,6 +255,101 @@ public class ChatServiceImpl implements ChatService {
         // 逻辑删除会话本身。
         conversationMapper.deleteById(conversation.getId());
     }
+    /**
+     * 保存失败 Trace。
+     *
+     * <p>该方法不能覆盖原始业务异常。即使 Trace 保存失败，
+     * 最终仍然应该抛出 Python 调用的原始异常。</p>
+     */
+    private void saveFailedTraceSafely(
+            Long traceId,
+            Long tenantId,
+            String requestId,
+            Long conversationId,
+            ChatRequest request,
+            Exception originalException
+    ) {
+        try {
+            // HashMap 允许 value 为 null，
+            // Map.of 不允许 knowledgeBaseId 等字段为 null。
+            Map<String, Object> input = new HashMap<>();
+
+            input.put(
+                    "conversationId",
+                    conversationId
+            );
+            input.put(
+                    "knowledgeBaseId",
+                    request.getKnowledgeBaseId()
+            );
+            input.put(
+                    "question",
+                    limitText(request.getQuestion(), 1000)
+            );
+
+            ragTraceService.saveFailedTrace(
+                    traceId,
+                    tenantId,
+                    requestId,
+                    input,
+                    originalException
+            );
+        } catch (Exception traceException) {
+            // Trace 保存失败不能覆盖原始异常。
+            log.error(
+                    "保存失败 RAG Trace 异常, traceId={}",
+                    traceId,
+                    traceException
+            );
+        }
+    }
+    /**
+     * 限制写入 Trace 的文本长度。
+     */
+    private String limitText(
+            String text,
+            int maxLength
+    ) {
+        if (text == null) {
+            return null;
+        }
+
+        if (text.length() <= maxLength) {
+            return text;
+        }
+
+        return text.substring(0, maxLength);
+    }
+    /**
+     * 校验 Python 没有返回错误的 Trace ID。
+     */
+    private void validatePythonTraceId(
+            Long expectedTraceId,
+            PythonChatData pythonData
+    ) {
+        if (pythonData == null) {
+            throw new RemoteException(
+                    BaseErrorCode.REMOTE_ERROR,
+                    "Python Chat 服务未返回数据"
+            );
+        }
+
+        if (pythonData.getTraceId() == null) {
+            throw new RemoteException(
+                    BaseErrorCode.REMOTE_ERROR,
+                    "Python Chat 服务未返回 Trace ID"
+            );
+        }
+
+        if (!expectedTraceId.equals(
+                pythonData.getTraceId()
+        )) {
+            throw new RemoteException(
+                    BaseErrorCode.REMOTE_ERROR,
+                    "Python Chat 服务返回的 Trace ID 不一致"
+            );
+        }
+    }
 
     private ChatConversation getOrCreateConversation(ChatRequest request, Long tenantId, Long userId) {
         if (request.getConversationId() != null) {
@@ -232,7 +391,9 @@ public class ChatServiceImpl implements ChatService {
                                              Long tenantId,
                                              Long parentMessageId,
                                              String answer,
-                                             String citations) {
+                                             String citations,
+                                             String tokenUsage,
+                                             Long traceId) {
         ChatMessage message = ChatMessage.builder()
                 .id(idGenerator.nextId())
                 .tenantId(tenantId)
@@ -240,7 +401,9 @@ public class ChatServiceImpl implements ChatService {
                 .parentMessageId(parentMessageId)
                 .role("ASSISTANT")
                 .content(answer)
-                .citations(citations)                .tokenUsage("{}")
+                .citations(citations)
+                .tokenUsage(tokenUsage)
+                .traceId(traceId)
                 .build();
 
         messageMapper.insert(message);

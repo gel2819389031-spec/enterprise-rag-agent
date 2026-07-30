@@ -55,9 +55,38 @@ public class PythonChatData {
      * 路由或知识库选择原因。
      */
     private String routeReason;
+    /**
+     * 本次 RAG Trace ID。
+     */
+    private Long traceId;
 
+    /**
+     * 回答状态：GENERAL、ANSWERED、NO_EVIDENCE 等。
+     */
+    private String answerStatus;
+
+    /**
+     * 回答实际使用的引用编号。
+     */
+    private List<Integer> usedCitationIndexes;
+
+    /**
+     * 模型生成但不存在的引用编号。
+     */
+    private List<Integer> invalidCitationIndexes;
+
+    /**
+     * 本次 LLM Token 用量。
+     */
+    private PythonTokenUsage tokenUsage;
+
+    /**
+     * Python 返回的完整 Trace。
+     */
+    private PythonRagTraceData trace;
     /**
      * 本次回答引用的文档分片。
      */
     private List<Map<String, Object>> citations;
+
 }

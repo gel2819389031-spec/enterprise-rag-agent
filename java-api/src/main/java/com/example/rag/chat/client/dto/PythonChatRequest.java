@@ -28,6 +28,15 @@ public class PythonChatRequest {
      * 当前登录用户 ID。
      */
     private Long userId;
+    /**
+     * 本次 RAG 请求的 Trace ID，由 Java 生成。
+     */
+    private Long traceId;
+
+    /**
+     * Java 与 Python 日志之间的请求关联 ID。
+     */
+    private String requestId;
 
     /**
      * 当前会话 ID。

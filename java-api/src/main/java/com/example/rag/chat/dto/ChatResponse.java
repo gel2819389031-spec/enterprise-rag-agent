@@ -1,5 +1,6 @@
 package com.example.rag.chat.dto;
 
+import com.example.rag.chat.client.dto.PythonTokenUsage;
 import lombok.Builder;
 import lombok.Data;
 
@@ -19,6 +20,10 @@ public class ChatResponse {
     private Long conversationId;
 
     /**
+     * 本次 RAG Trace ID。
+     */
+    private Long traceId;
+    /**
      * 用户输入的原始问题。
      */
     private String question;
@@ -27,6 +32,11 @@ public class ChatResponse {
      * 结合历史改写后的独立问题。
      */
     private String standaloneQuery;
+
+    /**
+     * 回答状态。
+     */
+    private String answerStatus;
 
     /**
      * 模型最终回答。
@@ -62,6 +72,20 @@ public class ChatResponse {
      * 路由决策原因。
      */
     private String routeReason;
+    /**
+     * 回答实际使用的引用编号。
+     */
+    private List<Integer> usedCitationIndexes;
+
+    /**
+     * 模型生成的无效引用编号。
+     */
+    private List<Integer> invalidCitationIndexes;
+
+    /**
+     * 本次模型 Token 用量。
+     */
+    private PythonTokenUsage tokenUsage;
 
     /**
      * 本次回答引用的文档分片。
