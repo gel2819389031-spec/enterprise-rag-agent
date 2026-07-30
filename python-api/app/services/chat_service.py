@@ -124,17 +124,36 @@ class ChatService:
             )
 
             # 第六步：将检索结果组装成模型上下文。
-            context = self._context_packer.pack(documents)
+            # 打包上下文并获得真正进入 Prompt 的分片。
+            packed_context = self._context_packer.pack(
+                documents
+            )
+
+            # 只把打包后的文本发送给 LLM。
+            context = packed_context.text
 
             # 第七步：将文档元数据转换为前端引用信息。
-            citations = self._build_citations(documents)
-            # 第八步：普通对话和 RAG 对话统一调用 LLM 生成回答。
-        answer = self._llm_client.chat(
-            question=resolved_query.standalone_query,
-            model=model,
-            history=request.history,
-            context=context,
-        )
+            citations = self._build_citations( packed_context.documents)
+            logger.info(
+                "Context packing completed, input_count=%s, packed_count=%s, "
+                "total_chars=%s, truncated=%s",
+                len(documents),
+                len(packed_context.documents),
+                packed_context.total_chars,
+                packed_context.truncated,
+            )
+        # 第八步：普通对话和 RAG 对话统一调用 LLM 生成回答。
+        if route.need_rag and not context.strip():
+            answer = self._settings.rag_empty_context_message
+        else:
+            answer = self._llm_client.chat(
+                question=resolved_query.standalone_query,
+                model=model,
+                history=request.history,
+                context=context,
+                rag_mode=route.need_rag,
+            )
+
         return ChatData(
             question=request.question,
             standalone_query=resolved_query.standalone_query,
@@ -171,6 +190,11 @@ class ChatService:
                     "documentId": metadata.get("document_id"),
                     "documentName": metadata.get("document_name"),
                     "chunkIndex": metadata.get("chunk_index"),
+                    "citationIndex": metadata.get("citation_index"),
+                    "contextTruncated": metadata.get(
+                        "context_truncated",
+                        False,
+                    ),
                     # RRF 融合信息。
                     "fusionScore": metadata.get("fusion_score"),
                     "vectorScore": metadata.get("vector_score"),

@@ -70,7 +70,14 @@ class Settings:
     rerank_final_top_k: int
     rerank_max_document_chars: int
     rerank_timeout_seconds: int
+    # 单个分片进入上下文时允许的最大字符数。
+    rag_context_max_document_chars: int
 
+    # RAG 没有检索结果时返回的提示。
+    rag_empty_context_message: str
+
+    # 是否将检索分数写进 LLM 上下文。
+    rag_context_include_scores: bool
     java_api_base_url: str
 
 
@@ -159,6 +166,24 @@ def get_settings() -> Settings:
         ),
         rerank_timeout_seconds=int(
             os.getenv("RERANK_TIMEOUT_SECONDS", "30")
+        ),
+        rag_context_max_document_chars=int(
+            os.getenv(
+                "RAG_CONTEXT_MAX_DOCUMENT_CHARS",
+                "5000",
+            )
+        ),
+        rag_empty_context_message=os.getenv(
+            "RAG_EMPTY_CONTEXT_MESSAGE",
+            "根据当前知识库中的资料，"
+            "暂时没有找到能够回答该问题的充分依据。",
+        ),
+        rag_context_include_scores=(
+                os.getenv(
+                    "RAG_CONTEXT_INCLUDE_SCORES",
+                    "false",
+                ).lower()
+                == "true"
         ),
         java_api_base_url=os.getenv("JAVA_API_BASE_URL", "http://localhost:8123"),
     )
