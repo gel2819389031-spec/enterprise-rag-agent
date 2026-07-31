@@ -6,14 +6,18 @@ import com.example.rag.chat.client.PythonChatClient;
 import com.example.rag.chat.client.dto.PythonChatData;
 import com.example.rag.chat.client.dto.PythonChatHistoryMessage;
 import com.example.rag.chat.client.dto.PythonChatRequest;
+import com.example.rag.chat.client.sse.PythonChatStreamSession;
+import com.example.rag.chat.client.sse.PythonSseEvent;
 import com.example.rag.chat.dto.ChatConversationQueryRequest;
 import com.example.rag.chat.dto.ChatRequest;
 import com.example.rag.chat.dto.ChatResponse;
+import com.example.rag.chat.dto.ChatStreamContext;
 import com.example.rag.chat.entity.ChatConversation;
 import com.example.rag.chat.entity.ChatMessage;
 import com.example.rag.chat.mapper.ChatConversationMapper;
 import com.example.rag.chat.mapper.ChatMessageMapper;
 import com.example.rag.chat.service.ChatService;
+import com.example.rag.chat.transaction.ChatPersistenceService;
 import com.example.rag.common.api.PageResult;
 import com.example.rag.common.context.LoginUser;
 import com.example.rag.common.context.UserContext;
@@ -21,19 +25,25 @@ import com.example.rag.common.error.BaseErrorCode;
 import com.example.rag.common.error.ClientException;
 import com.example.rag.common.error.RemoteException;
 import com.example.rag.common.id.IdGenerator;
+import com.example.rag.common.web.SseCloseReason;
+import com.example.rag.common.web.SseEmitterSender;
 import com.example.rag.trace.service.RagTraceService;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Chat 业务服务实现。
@@ -44,13 +54,28 @@ import java.util.Map;
 public class ChatServiceImpl implements ChatService {
 
     private static final int HISTORY_LIMIT = 10;
-
+    /**
+     * SSE 最长连接时间：5 分钟。
+     */
+    private static final long SSE_TIMEOUT_MILLIS =
+            5 * 60 * 1000L;
     private final PythonChatClient pythonChatClient;
     private final ChatConversationMapper conversationMapper;
     private final ChatMessageMapper messageMapper;
     private final IdGenerator idGenerator;
     private final ObjectMapper objectMapper;
     private final RagTraceService ragTraceService;
+    /**
+     * 流式聊天短事务服务。
+     */
+    private final ChatPersistenceService chatPersistenceService;
+
+    /**
+     * 流式聊天独立线程池。
+     */
+    private final Executor chatStreamExecutor;
+
+
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -198,6 +223,278 @@ public class ChatServiceImpl implements ChatService {
                 // 返回回答引用的文档分片。
                 .citations(pythonData.getCitations())
                 .build();
+    }
+
+    @Override
+    public SseEmitter streamChat(ChatRequest request) {
+        // 在建立 SSE 连接前完成参数与登录上下文校验。
+        validateRequest(request);
+        LoginUser loginUser = UserContext.requireUser();
+        Long tenantId = parseLong(loginUser.tenantId(), "租户 ID 必须是数字");
+        Long userId = parseLong(loginUser.userId(), "用户 ID 必须是数字");
+
+        // Java 生成 Trace ID，并用它关联 Java 与 Python 日志。
+        Long traceId = idGenerator.nextId();
+        String requestId = String.valueOf(traceId);
+
+        // 使用短事务创建或校验会话、读取历史并保存用户消息。
+        ChatStreamContext streamContext = chatPersistenceService.prepare(
+                request, tenantId, userId, traceId, requestId
+        );
+
+        // 创建前端 SSE、Python 下游取消句柄和事件发送器。
+        SseEmitter emitter = new SseEmitter(SSE_TIMEOUT_MILLIS);
+        PythonChatStreamSession streamSession = new PythonChatStreamSession();
+        SseEmitterSender sender = new SseEmitterSender(
+                emitter,
+                reason -> {
+                    // Sender 保留具体关闭原因，回调只负责释放 Python 响应流。
+                    log.debug("SSE 关闭, traceId={}, reason={}", traceId, reason);
+                    streamSession.cancel();
+                }
+        );
+
+        // 只有 final 数据成功入库后才设置为 true。
+        AtomicBoolean finalPersisted = new AtomicBoolean(false);
+
+        // Python Client 会阻塞读取 SSE，因此放入专用线程池。
+        chatStreamExecutor.execute(() -> {
+            try {
+                pythonChatClient.streamChat(
+                        streamContext.getPythonRequest(),
+                        event -> {
+                            if (sender.isOpen()) {
+                                handlePythonStreamEvent(
+                                        event,
+                                        streamContext,
+                                        sender,
+                                        finalPersisted
+                                );
+                            }
+                        },
+                        streamSession
+                );
+
+                // 流正常结束却没有成功入库 final，属于协议失败。
+                if (!finalPersisted.get()) {
+                    throw new IllegalStateException(
+                            "Python SSE stream ended without persisted final event"
+                    );
+                }
+
+                // complete() 会先记录 COMPLETED，再触发取消句柄。
+                sender.complete();
+            } catch (Exception exception) {
+                handleStreamException(
+                        exception,
+                        request,
+                        streamContext,
+                        sender,
+                        finalPersisted
+                );
+            }
+        });
+
+        return emitter;
+    }
+
+    /**
+     * 根据事件名称处理 Python 返回的单个 SSE 事件。
+     */
+    private void handlePythonStreamEvent(
+            PythonSseEvent event,
+            ChatStreamContext streamContext,
+            SseEmitterSender sender,
+            AtomicBoolean finalPersisted
+    ) {
+        String eventName = event.getEvent();
+        JsonNode eventData = event.getData();
+
+        switch (eventName) {
+            case "final" -> handleFinalEvent(
+                    eventData, streamContext, sender, finalPersisted
+            );
+            case "error" -> handlePythonErrorEvent(eventData, sender);
+            case "done" -> {
+                // done 只转发，外层确认 final 已入库后再关闭连接。
+                sender.send("done", eventData);
+            }
+            default -> {
+                // 原样转发 start、route、retrieval、delta 和 heartbeat。
+                sender.send(eventName, eventData);
+            }
+        }
+    }
+
+    /**
+     * 使用短事务保存 final，并在成功后把权威结果转发给前端。
+     */
+    private void handleFinalEvent(
+            JsonNode eventData,
+            ChatStreamContext streamContext,
+            SseEmitterSender sender,
+            AtomicBoolean finalPersisted
+    ) {
+        // Parser 顺序回调；已成功处理 final 时忽略重复事件。
+        if (finalPersisted.get()) {
+            log.warn("忽略重复 final, traceId={}", streamContext.getTraceId());
+            return;
+        }
+
+        try {
+            PythonChatData pythonData = objectMapper.treeToValue(
+                    eventData, PythonChatData.class
+            );
+
+            // 保存助手消息、引用、Token 用量和成功 Trace。
+            chatPersistenceService.saveFinalResult(streamContext, pythonData);
+
+            // 事务成功后再标记，不能在数据库保存前提前设置。
+            finalPersisted.set(true);
+            sender.send("final", eventData);
+        } catch (Exception exception) {
+            throw new RemoteException(
+                    BaseErrorCode.REMOTE_ERROR,
+                    "保存流式聊天最终结果失败",
+                    exception
+            );
+        }
+    }
+
+    /**
+     * 转发 Python error，并抛出异常交给流式线程统一保存失败 Trace。
+     */
+    private void handlePythonErrorEvent(
+            JsonNode eventData,
+            SseEmitterSender sender
+    ) {
+        boolean forwarded = sender.send("error", eventData);
+        String message = eventData.path("message")
+                .asText("Python Chat 流式处理失败");
+        throw new PythonStreamException(message, forwarded);
+    }
+
+    /**
+     * 根据 Sender 保存的关闭原因统一处理异常。
+     */
+    private void handleStreamException(
+            Exception exception,
+            ChatRequest request,
+            ChatStreamContext streamContext,
+            SseEmitterSender sender,
+            AtomicBoolean finalPersisted
+    ) {
+        SseCloseReason reason = sender.getCloseReason();
+        Long traceId = streamContext.getTraceId();
+
+        // 正常完成后的下游关闭异常不属于业务失败。
+        if (reason == SseCloseReason.COMPLETED) {
+            log.debug("流式 Chat 已正常完成, traceId={}", traceId);
+            return;
+        }
+
+        // 客户端取消时不再向已经关闭的连接发送 error。
+        if (reason == SseCloseReason.CLIENT_DISCONNECTED) {
+            log.info("客户端取消流式 Chat, traceId={}", traceId);
+            if (!finalPersisted.get()) {
+                saveStreamFailedTraceSafely(
+                        streamContext,
+                        request,
+                        new IllegalStateException(
+                                "Chat stream cancelled by client", exception
+                        )
+                );
+            }
+            return;
+        }
+
+        // 超时由 Sender 关闭前端 SSE，并通过取消句柄关闭 Python 流。
+        if (reason == SseCloseReason.TIMEOUT) {
+            log.warn("流式 Chat 超时, traceId={}", traceId);
+            if (!finalPersisted.get()) {
+                saveStreamFailedTraceSafely(
+                        streamContext,
+                        request,
+                        new IllegalStateException("Chat stream timeout", exception)
+                );
+            }
+            return;
+        }
+
+        log.error("Java 流式 Chat 处理失败, traceId={}", traceId, exception);
+
+        // final 已成功入库时不能再写失败 Trace。
+        if (!finalPersisted.get()) {
+            saveStreamFailedTraceSafely(streamContext, request, exception);
+        }
+
+        // Python error 已经转发时，不重复发送 Java error。
+        boolean errorAlreadyForwarded =
+                exception instanceof PythonStreamException streamException
+                        && streamException.isErrorForwarded();
+
+        if (!errorAlreadyForwarded && sender.isOpen()) {
+            sender.send(
+                    "error",
+                    Map.of(
+                            "code", "JAVA_STREAM_FAILED",
+                            "message", safeErrorMessage(exception),
+                            "traceId", traceId
+                    )
+            );
+        }
+
+        // 允许前端先消费 error，再正常结束传输并取消 Python 下游。
+        sender.complete();
+    }
+
+    /**
+     * 使用独立事务保存失败 Trace，不覆盖原始异常。
+     */
+    private void saveStreamFailedTraceSafely(
+            ChatStreamContext streamContext,
+            ChatRequest request,
+            Throwable exception
+    ) {
+        try {
+            chatPersistenceService.saveFailedTrace(
+                    streamContext, request, exception
+            );
+        } catch (Exception traceException) {
+            log.error(
+                    "保存流式失败 Trace 异常, traceId={}",
+                    streamContext.getTraceId(),
+                    traceException
+            );
+        }
+    }
+
+    /**
+     * 获取适合通过 SSE 返回的简短错误信息。
+     */
+    private String safeErrorMessage(Throwable exception) {
+        String message = exception.getMessage();
+        if (message == null || message.isBlank()) {
+            return "流式聊天处理失败";
+        }
+        return limitText(message, 500);
+    }
+
+    /**
+     * 标记 Python error 是否已经转发给前端。
+     */
+    private static final class PythonStreamException extends RuntimeException {
+
+        private final boolean errorForwarded;
+
+        private PythonStreamException(String message, boolean errorForwarded) {
+            super(message);
+            this.errorForwarded = errorForwarded;
+        }
+
+        private boolean isErrorForwarded() {
+            return errorForwarded;
+        }
     }
 
     @Override

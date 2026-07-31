@@ -10,6 +10,7 @@ import com.example.rag.common.api.ApiResult;
 import com.example.rag.common.api.PageResult;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -18,6 +19,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
 
@@ -37,6 +39,19 @@ public class ChatController {
     @PostMapping("/completions")
     public ApiResult<ChatResponse> chat(@RequestBody ChatRequest request) throws JsonProcessingException {
         return ApiResult.ok(chatService.chat(request));
+    }
+    /**
+     * SSE 流式聊天接口。
+     */
+    @PostMapping(
+            value = "/stream",
+            produces = MediaType.TEXT_EVENT_STREAM_VALUE
+    )
+    public SseEmitter streamChat(
+            @RequestBody ChatRequest request
+    ) {
+        // 返回 SseEmitter，不能再包装 ApiResult。
+        return chatService.streamChat(request);
     }
 
     /**
