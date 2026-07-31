@@ -5,6 +5,7 @@ import com.example.rag.user.dto.UserCreateRequest;
 import com.example.rag.user.entity.SysUser;
 import com.example.rag.user.service.UserService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -27,6 +28,7 @@ public class UserController {
     /**
      * 创建用户。
      */
+    @PreAuthorize("hasRole('ADMIN')")
     @PostMapping
     public ApiResult<SysUser> createUser(@RequestBody UserCreateRequest request) {
 

@@ -9,6 +9,9 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
@@ -28,22 +31,6 @@ public class RequestContextFilter extends OncePerRequestFilter {
      * 请求链路 ID 请求头。调用方传入则透传，否则自动生成。
      */
     public static final String REQUEST_ID_HEADER = "X-Request-Id";
-    /**
-     * 临时用户 ID 请求头，后续接认证系统后可由认证结果替代。
-     */
-    public static final String USER_ID_HEADER = "X-User-Id";
-    /**
-     * 临时用户名请求头。
-     */
-    public static final String USERNAME_HEADER = "X-Username";
-    /**
-     * 临时租户 ID 请求头。
-     */
-    public static final String TENANT_ID_HEADER = "X-Tenant-Id";
-    /**
-     * 临时角色请求头。
-     */
-    public static final String ROLE_HEADER = "X-Role";
 
     /**
      * 初始化请求上下文，执行后续过滤器链，并在 finally 中清理 ThreadLocal。
@@ -55,7 +42,8 @@ public class RequestContextFilter extends OncePerRequestFilter {
         try {
             RequestContext.setRequestId(requestId);
             RagTraceContext.setTraceId(requestId);
-            setupUserContext(request);
+            // 使用 Spring Security 认证结果建立用户上下文。
+            setupUserContextFromSecurity();
             response.setHeader(REQUEST_ID_HEADER, requestId);
             filterChain.doFilter(request, response);
         } catch (Exception ex) {
@@ -71,17 +59,46 @@ public class RequestContextFilter extends OncePerRequestFilter {
     /**
      * 从请求头构建登录用户上下文；当前没有接认证系统，所以只做轻量模拟。
      */
-    private void setupUserContext(HttpServletRequest request) {
-        String userId = request.getHeader(USER_ID_HEADER);
-        if (userId == null || userId.isBlank()) {
+    private void setupUserContextFromSecurity() {
+        // 获取 Spring Security 当前认证对象。
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        /*
+         * 登录接口、健康检查等公开接口可能没有 Authentication。
+         */
+        if (
+                authentication == null
+                        || !authentication.isAuthenticated()
+        ) {
             return;
         }
-        UserContext.set(new LoginUser(
-                userId,
-                firstNotBlank(request.getHeader(USERNAME_HEADER), userId),
-                firstNotBlank(request.getHeader(TENANT_ID_HEADER), "default"),
-                firstNotBlank(request.getHeader(ROLE_HEADER), "user")
-        ));
+        /*
+         * Resource Server JWT 认证成功后，
+         * principal 默认是 Jwt 对象。
+         */
+        if (!(authentication.getPrincipal() instanceof Jwt jwt)) {
+            return;
+        }
+        // sub 对应用户 ID。
+        String userId = jwt.getSubject();
+
+        // 从自定义 Claims 中读取租户和用户信息。
+        String tenantId =
+                jwt.getClaimAsString("tenantId");
+
+        String username =
+                jwt.getClaimAsString("username");
+
+        String role =
+                jwt.getClaimAsString("role");
+        // 建立项目已有的 LoginUser。
+        UserContext.set(
+                new LoginUser(
+                        userId,
+                        username,
+                        tenantId,
+                        role
+                )
+        );
     }
 
     /**

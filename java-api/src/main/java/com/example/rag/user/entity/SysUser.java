@@ -44,6 +44,25 @@ public class SysUser {
      */
     private String roleCode;
     /**
+     * BCrypt 密码哈希，不能保存明文密码。
+     */
+    private String passwordHash;
+
+    /**
+     * 用户 Token 版本。
+     */
+    private Integer tokenVersion;
+
+    /**
+     * 最近登录时间。
+     */
+    private Instant lastLoginAt;
+
+    /**
+     * 最近修改密码时间。
+     */
+    private Instant passwordChangedAt;
+    /**
      * 用户状态，默认 1 表示启用。
      */
     private Integer status;

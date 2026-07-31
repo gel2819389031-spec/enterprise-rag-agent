@@ -40,4 +40,6 @@ public class UserCreateRequest {
      */
     private Integer status;
 
+    private String password;
+
 }

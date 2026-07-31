@@ -54,6 +54,14 @@ rag:
     base-url: http://localhost:8090
     # Java 调用 Python Agent 的超时时间。
     timeout-seconds: 60
+  security:
+    jwt:
+      #Token 签发方
+      issuer: enterprise-rag-agent
+      access-token-ttl: 15m
+      private-key: classpath:keys/jwt-private.pem
+      public-key: classpath:keys/jwt-public.pem
+      refresh-token-ttl: 7d
 
 mybatis-plus:
   global-config:

@@ -16,10 +16,13 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+
+import static com.rometools.utils.Strings.isBlank;
 
 /**
  * 用户服务实现。
@@ -29,6 +32,7 @@ import java.time.Instant;
 @Slf4j
 public class UserServiceImpl implements UserService {
 
+    private final PasswordEncoder passwordEncoder;
     private final SysUserMapper userMapper;
     private final TenantService tenantService;
     private final IdGenerator idGenerator;
@@ -47,6 +51,10 @@ public class UserServiceImpl implements UserService {
             tenantService.getTenant(request.getTenantId());
             // 创建前检查同一租户下用户名是否已存在。
             ensureUsernameNotExists(request.getTenantId(), request.getUsername());
+            String passwordHash =
+                    passwordEncoder.encode(
+                            request.getPassword()
+                    );
             user = SysUser.builder()
                     .id(idGenerator.nextId())
                     .roleCode(isBlank(request.getRoleCode()) ? "USER" : request.getRoleCode())
@@ -56,6 +64,8 @@ public class UserServiceImpl implements UserService {
                     .email(request.getEmail())
                     .roleCode(request.getRoleCode())
                     .status(request.getStatus())
+                    .passwordHash(passwordHash)
+                    .passwordChangedAt(Instant.now())
                     .build();
             // 调用 Mapper 将用户记录写入数据库。
             userMapper.insert(user);
@@ -143,6 +153,9 @@ public class UserServiceImpl implements UserService {
         }
         if (isBlank(request.getUsername())) {
             throw new ClientException(BaseErrorCode.BAD_REQUEST, "用户名 username 不能为空");
+        }
+        if(isBlank(request.getPassword())) {
+            throw new ClientException(BaseErrorCode.BAD_REQUEST, "密码 password 不能为空");
         }
     }
 

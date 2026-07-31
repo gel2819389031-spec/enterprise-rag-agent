@@ -9,6 +9,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataAccessException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
@@ -56,6 +57,23 @@ public class GlobalExceptionHandler {
         log.error("Unhandled database exception, requestId={}", RequestContext.requestId(), ex);
         return ApiResult.fail(BaseErrorCode.DATABASE_ERROR.code(), withRequestId("数据库操作失败，请稍后再试"));
     }
+
+    @ExceptionHandler(AccessDeniedException.class)
+    @ResponseStatus(HttpStatus.FORBIDDEN)
+    public ApiResult<Void> handleAccessDeniedException(
+            AccessDeniedException exception
+    ) {
+        log.warn(
+                "用户访问权限不足, message={}",
+                exception.getMessage()
+        );
+
+        return ApiResult.fail(
+                BaseErrorCode.FORBIDDEN.code(),
+                "当前用户没有访问权限"
+        );
+    }
+
 
     /**
      * 处理兜底未知异常，避免把堆栈或内部细节直接暴露给调用方。
