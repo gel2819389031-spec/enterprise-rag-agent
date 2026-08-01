@@ -40,4 +40,8 @@ public interface IngestionTaskService {
      * 标记任务执行失败。
      */
     void markTaskFailed(Long taskId, String errorMessage);
+    /**
+     * 查询文档最新的入库任务。
+     */
+    IngestionTask getLatestTaskByDocumentId(Long documentId);
 }

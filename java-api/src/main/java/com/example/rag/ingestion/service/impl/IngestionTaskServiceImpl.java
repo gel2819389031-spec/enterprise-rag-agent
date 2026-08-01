@@ -17,6 +17,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
@@ -101,9 +103,36 @@ public class IngestionTaskServiceImpl implements IngestionTaskService {
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class,propagation = Propagation.REQUIRES_NEW)
     public void markTaskFailed(Long taskId, String errorMessage) {
         // 更新任务状态为处理失败，并记录失败原因。
         updateTaskStatus(taskId, IngestionTaskStatus.FAILED.getCode(), errorMessage);
+    }
+    @Override
+    public IngestionTask getLatestTaskByDocumentId(
+            Long documentId
+    ) {
+        // 根据文档 ID 查询最近创建的任务。
+        IngestionTask task = taskMapper.selectOne(
+                new LambdaQueryWrapper<IngestionTask>()
+                        .eq(
+                                IngestionTask::getDocumentId,
+                                documentId
+                        )
+                        .orderByDesc(
+                                IngestionTask::getCreatedAt
+                        )
+                        .last("limit 1")
+        );
+
+        if (task == null) {
+            throw new BusinessException(
+                    BaseErrorCode.NOT_FOUND,
+                    "文档入库任务不存在"
+            );
+        }
+
+        return task;
     }
     private void initTaskSteps(Long taskId) {
         // 上传步骤已经在 Step 09 完成，所以初始化为成功。
