@@ -1,0 +1,253 @@
+:root {
+  font-family: Inter, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+  color: #172033;
+  background: #f4f6fa;
+  font-synthesis: none;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  min-width: 1180px;
+}
+button,
+input,
+textarea {
+  letter-spacing: 0;
+}
+.shell {
+  min-height: 100vh;
+}
+.brand {
+  height: 72px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 22px;
+  color: #fff;
+}
+.brand-mark {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  background: #5661db;
+  font-size: 20px;
+}
+.brand strong,
+.brand small {
+  display: block;
+}
+.brand small {
+  color: #8f9bb3;
+  font-size: 11px;
+  margin-top: 2px;
+}
+.topbar {
+  height: 64px;
+  padding: 0 28px;
+  background: #fff;
+  border-bottom: 1px solid #e8ebf2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.content {
+  padding: 26px 28px 40px;
+  overflow: auto;
+}
+.page-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: end;
+  margin-bottom: 22px;
+}
+.page-head h2 {
+  margin: 0 0 4px !important;
+  font-size: 24px !important;
+}
+.filter-bar {
+  padding: 14px 16px;
+  background: #fff;
+  border: 1px solid #e8ebf2;
+  margin-bottom: 14px;
+}
+.page-alert {
+  margin-bottom: 14px;
+}
+.grid-two {
+  display: grid;
+  grid-template-columns: 1.35fr 1fr;
+  gap: 16px;
+  margin-top: 16px;
+}
+.empty-chart {
+  height: 235px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: #97a0b4;
+  font-size: 30px;
+}
+.section-card {
+  margin-top: 16px;
+}
+.pending-note {
+  margin-top: 12px;
+  color: #7a8499;
+}
+.upload-panel {
+  margin-bottom: 16px;
+}
+.upload-icon {
+  font-size: 34px;
+  color: #5661db;
+}
+.upload-progress {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 16px;
+  margin-top: 10px;
+}
+.chunk-content {
+  white-space: pre-wrap;
+  line-height: 1.7;
+  max-height: 180px;
+  overflow: auto;
+}
+.login-page {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 1.15fr 0.85fr;
+  background: #f6f8fc;
+}
+.login-story {
+  padding: 11vh 9vw;
+  color: #fff;
+  background: linear-gradient(135deg, #172554 0%, #263a82 52%, #4f5bd5 100%);
+}
+.login-story h1 {
+  color: #fff !important;
+  font-size: 48px !important;
+}
+.login-story .ant-typography {
+  color: #dbe3ff !important;
+}
+.login-story p {
+  font-size: 18px;
+  max-width: 540px;
+}
+.login-symbol {
+  font-size: 52px;
+}
+.signal-grid {
+  display: flex;
+  gap: 10px;
+  margin-top: 36px;
+}
+.signal-grid span {
+  padding: 8px 12px;
+  border: 1px solid #ffffff33;
+  border-radius: 6px;
+  background: #ffffff12;
+}
+.login-panel {
+  width: 430px;
+  align-self: center;
+  justify-self: center;
+  padding: 22px;
+  box-shadow: 0 18px 50px #25325c20;
+}
+.chat-workspace {
+  height: calc(100vh - 116px);
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  background: #fff;
+  border: 1px solid #e5e9f1;
+}
+.conversation-panel {
+  padding: 16px;
+  border-right: 1px solid #e8ebf2;
+  overflow: auto;
+}
+.conversation-panel .ant-list-item {
+  cursor: pointer;
+  padding: 12px 8px;
+}
+.conversation-panel .active {
+  background: #eef1ff;
+}
+.chat-main {
+  display: grid;
+  grid-template-rows: 58px 1fr auto;
+  min-width: 0;
+}
+.chat-toolbar {
+  padding: 10px 18px;
+  border-bottom: 1px solid #e8ebf2;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+.messages {
+  padding: 28px max(30px, 10vw);
+  overflow: auto;
+}
+.message {
+  display: grid;
+  grid-template-columns: 58px 1fr;
+  gap: 12px;
+  margin-bottom: 26px;
+}
+.message-role {
+  font-weight: 600;
+  color: #4f5bd5;
+}
+.message.user .message-body {
+  background: #f1f3f8;
+}
+.message-body {
+  padding: 14px 16px;
+  border-radius: 6px;
+  white-space: pre-wrap;
+  line-height: 1.75;
+}
+.citations {
+  margin-top: 12px;
+  color: #4f5bd5;
+  font-size: 12px;
+}
+.composer {
+  margin: 0 max(30px, 9vw) 22px;
+  border: 1px solid #ccd3e2;
+  padding: 10px;
+  display: flex;
+  align-items: end;
+  gap: 10px;
+  box-shadow: 0 8px 25px #23315b12;
+}
+.composer textarea {
+  border: 0 !important;
+  box-shadow: none !important;
+}
+.feature-icon {
+  font-size: 40px;
+  color: #5661db;
+  margin-bottom: 16px;
+}
+@media (max-width: 1366px) {
+  .content {
+    padding: 20px;
+  }
+  .messages {
+    padding: 22px 5vw;
+  }
+  .composer {
+    margin-left: 5vw;
+    margin-right: 5vw;
+  }
+}
