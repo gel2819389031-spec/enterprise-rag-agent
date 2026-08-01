@@ -47,9 +47,9 @@ public class KnowledgeBaseController {
      * 分页查询知识库。
      */
     @GetMapping
-    public ApiResult<PageResult<KnowledgeBase>> pageKnowledgeBases(@RequestParam(required = false) String keyword,
-                                                                   @RequestParam(defaultValue = "1") Long pageNo,
-                                                                   @RequestParam(defaultValue = "20") Long pageSize) {
+    public ApiResult<PageResult<KnowledgeBase>> pageKnowledgeBases(@RequestParam(name = "keyword", required = false) String keyword,
+                                                                   @RequestParam(name = "pageNo", defaultValue = "1") Long pageNo,
+                                                                   @RequestParam(name = "pageSize", defaultValue = "20") Long pageSize) {
         KnowledgeBaseQueryRequest request = new KnowledgeBaseQueryRequest();
         request.setKeyword(keyword);
         request.setPageNo(pageNo);

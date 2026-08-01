@@ -4,8 +4,7 @@ import lombok.Getter;
 /**
  * 文档入库任务状态枚举。
  *
- * 该枚举同时适用于 ingestion_task 主任务状态
- * 和 ingestion_task_step 步骤状态。
+ * 该枚举同时适用于 ingestion_task 主任务状态和 ingestion_task_step 步骤状态。
  */
 @Getter
 public enum IngestionTaskStatus {

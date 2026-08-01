@@ -1,5 +1,6 @@
 package com.example.rag.ingestion.processer;
 
+import com.example.rag.common.error.DocumentIngestionException;
 import com.example.rag.common.id.IdGenerator;
 import com.example.rag.common.storage.ObjectStorageService;
 import com.example.rag.ingestion.chunk.TextChunk;
@@ -85,9 +86,9 @@ public class DocumentIngestionProcessor {
             log.error("文档入库处理失败, taskId={}", taskId, ex);
 
             // 标记任务失败。
-            ingestionTaskService.markTaskFailed(taskId, ex.getMessage());
+            ingestionTaskService.markTaskFailed(taskId, safeErrorMessage(ex));
+            throw new DocumentIngestionException(taskId, ex);
 
-            throw new RuntimeException(ex);
         }
     }
 
@@ -145,6 +146,11 @@ public class DocumentIngestionProcessor {
                 chunk.getEndOffset()
         );
     }
+    private String safeErrorMessage(Throwable ex) {
+        return ex.getMessage() != null ? ex.getMessage() : ex.getClass().getSimpleName();
+    }
+
+
 
     private int estimateTokenCount(String content) {
         if (content == null || content.isBlank()) {

@@ -2,6 +2,7 @@ package com.example.rag.embedding.service.impl;
 
 import com.example.rag.common.error.BaseErrorCode;
 import com.example.rag.common.error.BusinessException;
+import com.example.rag.common.error.ChunkEmbeddingException;
 import com.example.rag.common.error.DatabaseException;
 import com.example.rag.embedding.client.EmbeddingClient;
 import com.example.rag.embedding.config.EmbeddingClientProperties;
@@ -69,11 +70,16 @@ public class ChunkEmbeddingServiceImpl implements ChunkEmbeddingService {
             ingestionTaskService.markTaskFailed(taskId, "Chunk 向量写入数据库异常");
             throw new DatabaseException("Chunk 向量写入数据库失败", ex);
         } catch (Exception ex) {
-            log.error("Chunk 向量化失败, taskId={}", taskId, ex);
-            ingestionTaskService.markTaskFailed(taskId, ex.getMessage());
-            throw ex;
+            log.error("文档向量化处理失败, taskId={}", taskId, ex);
+            ingestionTaskService.markTaskFailed(taskId, safeErrorMessage(ex));
+            throw new ChunkEmbeddingException(taskId, ex);
+
         }
     }
+    private String safeErrorMessage(Throwable ex) {
+        return ex.getMessage() != null ? ex.getMessage() : ex.getClass().getSimpleName();
+    }
+
     private void processChunksInBatches(List<KnowledgeDocumentChunk> chunks) {
         int batchSize = properties.getBatchSize();
 
