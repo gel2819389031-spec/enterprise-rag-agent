@@ -34,7 +34,13 @@ export interface CurrentUser {
 // --- 枚举类型 ---
 
 export type KnowledgeBaseVisibility = 'PRIVATE' | 'TENANT' | 'PUBLIC';
-export type DocumentParseStatus = 'PENDING' | 'PARSING' | 'PARSED' | 'READY' | 'FAILED';
+export type DocumentParseStatus =
+  | 'PENDING'     // 排队中
+  | 'PROCESSING'  // 解析切分中
+  | 'PARSED'      // 已解析，等待向量化
+  | 'EMBEDDING'   // 向量化中
+  | 'READY'       // 处理完成
+  | 'FAILED';     // 处理失败
 export type IngestionTaskType = 'DOCUMENT_INGEST' | 'EMBEDDING';
 export type IngestionStatus = 'PENDING' | 'RUNNING' | 'SUCCESS' | 'FAILED' | 'CANCELED';
 export type ChatChannel = 'WEB' | 'API';

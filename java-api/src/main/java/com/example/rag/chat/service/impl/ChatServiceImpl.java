@@ -31,8 +31,8 @@ import com.example.rag.trace.service.RagTraceService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -50,30 +50,37 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 @Service
 @Slf4j
-@RequiredArgsConstructor
 public class ChatServiceImpl implements ChatService {
 
     private static final int HISTORY_LIMIT = 10;
-    /**
-     * SSE 最长连接时间：5 分钟。
-     */
-    private static final long SSE_TIMEOUT_MILLIS =
-            5 * 60 * 1000L;
+    private static final long SSE_TIMEOUT_MILLIS = 5 * 60 * 1000L;
+
     private final PythonChatClient pythonChatClient;
     private final ChatConversationMapper conversationMapper;
     private final ChatMessageMapper messageMapper;
     private final IdGenerator idGenerator;
     private final ObjectMapper objectMapper;
     private final RagTraceService ragTraceService;
-    /**
-     * 流式聊天短事务服务。
-     */
     private final ChatPersistenceService chatPersistenceService;
-
-    /**
-     * 流式聊天独立线程池。
-     */
     private final Executor chatStreamExecutor;
+
+    public ChatServiceImpl(PythonChatClient pythonChatClient,
+                           ChatConversationMapper conversationMapper,
+                           ChatMessageMapper messageMapper,
+                           IdGenerator idGenerator,
+                           ObjectMapper objectMapper,
+                           RagTraceService ragTraceService,
+                           ChatPersistenceService chatPersistenceService,
+                           @Qualifier("chatStreamExecutor") Executor chatStreamExecutor) {
+        this.pythonChatClient = pythonChatClient;
+        this.conversationMapper = conversationMapper;
+        this.messageMapper = messageMapper;
+        this.idGenerator = idGenerator;
+        this.objectMapper = objectMapper;
+        this.ragTraceService = ragTraceService;
+        this.chatPersistenceService = chatPersistenceService;
+        this.chatStreamExecutor = chatStreamExecutor;
+    }
 
 
 

@@ -10,21 +10,25 @@ import com.example.rag.common.id.IdGenerator;
 import com.example.rag.common.storage.ObjectStorageService;
 import com.example.rag.common.utils.FileHashUtils;
 import com.example.rag.ingestion.dto.IngestionTaskCreateCommand;
+import com.example.rag.ingestion.pipeline.IngestionStepEvent;
+import com.example.rag.ingestion.pipeline.StepCode;
 import com.example.rag.ingestion.service.IngestionTaskService;
 import com.example.rag.knowledge.entity.KnowledgeBase;
 import com.example.rag.knowledge.entity.KnowledgeDocument;
+import com.example.rag.knowledge.enums.DocumentProcessStatus;
 import com.example.rag.knowledge.mapper.KnowledgeDocumentMapper;
 import com.example.rag.knowledge.service.KnowledgeBaseService;
 import com.example.rag.knowledge.service.KnowledgeDocumentService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Path;
-import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 
@@ -34,30 +38,37 @@ import java.util.Objects;
 @Service
 @RequiredArgsConstructor
 public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
-    private static final String DEFAULT_PARSE_STATUS = "PENDING";
+    private static final String DEFAULT_PARSE_STATUS = DocumentProcessStatus.PENDING.getCode();
 
     private final ObjectStorageService objectStorageService;
     private final KnowledgeDocumentMapper documentMapper;
     private final KnowledgeBaseService knowledgeBaseService;
     private final IngestionTaskService ingestionTaskService;
     private final IdGenerator idGenerator;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public KnowledgeDocument uploadDocument(Long knowledgeBaseId, MultipartFile file, String metadata) {
         validateUploadFile(file);
-        // 校验知识库是否存在、属于当前租户且可用。
         KnowledgeBase knowledgeBase = knowledgeBaseService.ensureUsable(knowledgeBaseId);
-        // 清洗原始文件名，避免目录穿越。
         String originalFilename = sanitizeFilename(file.getOriginalFilename());
-        // 提取文件扩展名，用作 fileType。
         String fileType = extractFileType(originalFilename);
-        // 计算文件 SHA-256 哈希，用于后续去重和版本判断。
-        String contentHash  = calculateSha256(file);
+
+        // 一次性读入内存，hash 和 upload 共用同一份字节，避免重复读取 InputStream。
+        byte[] fileBytes;
+        try {
+            fileBytes = file.getBytes();
+        } catch (IOException e) {
+            throw new ServiceException(BaseErrorCode.SERVICE_ERROR, "读取上传文件失败", e);
+        }
+        String contentHash = FileHashUtils.sha256Hex(fileBytes);
+
         // 生成对象存储 objectKey。
-        String objectKey = buildObjectKey(knowledgeBase.getTenantId(), knowledgeBaseId,  contentHash,originalFilename);
-        // 上传文件到 RustFS / S3。
-        String fileUri = uploadToObjectStorage(file, objectKey);
+        String objectKey = buildObjectKey(knowledgeBase.getTenantId(), knowledgeBaseId,
+                contentHash, originalFilename);
+        // 上传到 RustFS / S3，使用已读入的字节，不再次读取 MultipartFile。
+        String fileUri = uploadBytes(objectKey, fileBytes, file.getContentType());
         // 构造文档元数据实体。
         KnowledgeDocument document = KnowledgeDocument.builder()
                 .tenantId(knowledgeBase.getTenantId())
@@ -65,10 +76,10 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
                 .fileName(originalFilename)
                 .fileType(fileType)
                 .fileUri(fileUri)
-                .fileSize(file.getSize())
+                .fileSize((long) fileBytes.length)
                 .contentHash(contentHash)
                 .metadata(defaultMetadata(metadata))
-                .parseStatus("PENDING")
+                .parseStatus(DocumentProcessStatus.PENDING.getCode())
                 .build();
         KnowledgeDocument knowledgeDocument = registerDocument(document);
         // 构造文档入库任务创建命令。
@@ -77,8 +88,12 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
         command.setKnowledgeBaseId(knowledgeBaseId);
         command.setDocumentId(knowledgeDocument.getId());
         command.setCreatedBy(Long.valueOf(Objects.requireNonNull(UserContext.userId())));
-        // 创建文档入库任务和任务步骤。
-        ingestionTaskService.createDocumentIngestTask(command);
+        var task = ingestionTaskService.createDocumentIngestTask(command);
+
+        // 发布流水线起始事件 → @Async 异步执行 PARSE → EMBED → COMPLETE
+        eventPublisher.publishEvent(new IngestionStepEvent(task.getId(),
+                knowledgeBase.getTenantId(), StepCode.first()));
+
         return knowledgeDocument;
     }
 
@@ -199,13 +214,6 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
         }
         return filename.substring(index + 1).toLowerCase();
     }
-    private String calculateSha256(MultipartFile file) {
-        try (InputStream inputStream = file.getInputStream()) {
-            return FileHashUtils.sha256Hex(inputStream);
-        } catch (IOException ex) {
-            throw new ServiceException(BaseErrorCode.SERVICE_ERROR, "计算文件哈希失败", ex);
-        }
-    }
     private String buildObjectKey(Long tenantId, Long knowledgeBaseId, String contentHash, String filename) {
         return "tenant/"
                 + tenantId
@@ -216,16 +224,11 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
                 + "/"
                 + filename;
     }
-    private String uploadToObjectStorage(MultipartFile file, String objectKey) {
-        try (InputStream inputStream = file.getInputStream()) {
-            return objectStorageService.upload(
-                    objectKey,
-                    inputStream,
-                    file.getSize(),
-                    file.getContentType()
-            );
+    private String uploadBytes(String objectKey, byte[] content, String contentType) {
+        try (InputStream inputStream = new ByteArrayInputStream(content)) {
+            return objectStorageService.upload(objectKey, inputStream, content.length, contentType);
         } catch (IOException ex) {
-            throw new ServiceException(BaseErrorCode.SERVICE_ERROR, "读取上传文件失败", ex);
+            throw new ServiceException(BaseErrorCode.SERVICE_ERROR, "上传文件到对象存储失败", ex);
         }
     }
     private String defaultMetadata(String metadata) {

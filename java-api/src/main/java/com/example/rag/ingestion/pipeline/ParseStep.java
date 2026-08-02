@@ -3,6 +3,7 @@ package com.example.rag.ingestion.pipeline;
 import com.example.rag.ingestion.entity.IngestionTask;
 import com.example.rag.ingestion.processer.DocumentIngestionProcessor;
 import com.example.rag.ingestion.service.IngestionTaskService;
+import com.example.rag.knowledge.enums.DocumentProcessStatus;
 import com.example.rag.knowledge.service.KnowledgeDocumentService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -20,14 +21,12 @@ import org.springframework.stereotype.Component;
 public class ParseStep extends PipelineStep {
 
     private final DocumentIngestionProcessor processor;
-    private final KnowledgeDocumentService documentService;
 
     public ParseStep(IngestionTaskService taskService,
-                     DocumentIngestionProcessor processor,
-                     KnowledgeDocumentService documentService) {
-        super(taskService);
+                     KnowledgeDocumentService documentService,
+                     DocumentIngestionProcessor processor) {
+        super(taskService, documentService);
         this.processor = processor;
-        this.documentService = documentService;
     }
 
     @Override
@@ -38,8 +37,11 @@ public class ParseStep extends PipelineStep {
     @Override
     protected void doExecute(Long taskId) {
         IngestionTask task = requireTask(taskId);
+        documentService.markParseStatus(task.getDocumentId(),
+                DocumentProcessStatus.PROCESSING.getCode());
         int chunkCount = processor.parseAndSaveChunks(taskId);
-        documentService.markParseStatus(task.getDocumentId(), "PARSED");
+        documentService.markParseStatus(task.getDocumentId(),
+                DocumentProcessStatus.PARSED.getCode());
         log.info("文档解析完成, taskId={}, docId={}, chunks={}", taskId, task.getDocumentId(), chunkCount);
     }
 }

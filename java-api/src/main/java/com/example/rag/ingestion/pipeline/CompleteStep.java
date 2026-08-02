@@ -2,6 +2,7 @@ package com.example.rag.ingestion.pipeline;
 
 import com.example.rag.ingestion.entity.IngestionTask;
 import com.example.rag.ingestion.service.IngestionTaskService;
+import com.example.rag.knowledge.enums.DocumentProcessStatus;
 import com.example.rag.knowledge.service.KnowledgeDocumentService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -16,12 +17,9 @@ import org.springframework.stereotype.Component;
 @Component
 public class CompleteStep extends PipelineStep {
 
-    private final KnowledgeDocumentService documentService;
-
     public CompleteStep(IngestionTaskService taskService,
                         KnowledgeDocumentService documentService) {
-        super(taskService);
-        this.documentService = documentService;
+        super(taskService, documentService);
     }
 
     @Override
@@ -33,7 +31,8 @@ public class CompleteStep extends PipelineStep {
     protected void doExecute(Long taskId) {
         IngestionTask task = requireTask(taskId);
 
-        documentService.markParseStatus(task.getDocumentId(), "READY");
+        documentService.markParseStatus(task.getDocumentId(),
+                DocumentProcessStatus.READY.getCode());
         taskService.markTaskSuccess(taskId);
 
         log.info("入库流程完成, taskId={}, docId={}", taskId, task.getDocumentId());

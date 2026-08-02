@@ -5,7 +5,9 @@ import com.example.rag.embedding.service.ChunkEmbeddingService;
 import com.example.rag.ingestion.entity.IngestionTask;
 import com.example.rag.ingestion.service.IngestionTaskService;
 import com.example.rag.knowledge.entity.KnowledgeDocumentChunk;
+import com.example.rag.knowledge.enums.DocumentProcessStatus;
 import com.example.rag.knowledge.mapper.KnowledgeDocumentChunkMapper;
+import com.example.rag.knowledge.service.KnowledgeDocumentService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
@@ -28,10 +30,11 @@ public class EmbedStep extends PipelineStep {
     private final EmbeddingClientProperties properties;
 
     public EmbedStep(IngestionTaskService taskService,
+                     KnowledgeDocumentService documentService,
                      KnowledgeDocumentChunkMapper chunkMapper,
                      ChunkEmbeddingService embeddingService,
                      EmbeddingClientProperties properties) {
-        super(taskService);
+        super(taskService, documentService);
         this.chunkMapper = chunkMapper;
         this.embeddingService = embeddingService;
         this.properties = properties;
@@ -45,6 +48,9 @@ public class EmbedStep extends PipelineStep {
     @Override
     protected void doExecute(Long taskId) {
         IngestionTask task = requireTask(taskId);
+        documentService.markParseStatus(task.getDocumentId(),
+                DocumentProcessStatus.EMBEDDING.getCode());
+
         List<KnowledgeDocumentChunk> chunks =
                 chunkMapper.selectWithoutEmbeddingByDocumentId(task.getDocumentId());
 

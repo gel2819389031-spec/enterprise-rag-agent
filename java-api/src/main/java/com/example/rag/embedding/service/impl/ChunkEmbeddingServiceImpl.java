@@ -41,6 +41,7 @@ public class ChunkEmbeddingServiceImpl implements ChunkEmbeddingService {
 
     private final EmbeddingClientProperties properties;
     @Override
+    @Deprecated
     @Transactional(rollbackFor = Exception.class)
     public void embedDocumentChunks(Long taskId) {
 
@@ -80,29 +81,26 @@ public class ChunkEmbeddingServiceImpl implements ChunkEmbeddingService {
         return ex.getMessage() != null ? ex.getMessage() : ex.getClass().getSimpleName();
     }
 
+    /**
+     * 对单个批次的 Chunk 执行向量化并写入数据库。
+     * 不含任务状态管理，供流水线 EmbedStep 调用。
+     */
+    @Override
+    public int embedBatch(List<KnowledgeDocumentChunk> batch) {
+        List<String> texts = batch.stream()
+                .map(KnowledgeDocumentChunk::getContent)
+                .toList();
+        EmbeddingData data = embeddingClient.embed(texts, properties.getModel());
+        validateEmbeddingData(data, batch.size());
+        writeBatchEmbeddings(batch, data);
+        return batch.size();
+    }
+
     private void processChunksInBatches(List<KnowledgeDocumentChunk> chunks) {
         int batchSize = properties.getBatchSize();
-
         for (int start = 0; start < chunks.size(); start += batchSize) {
-            // 计算当前批次结束下标。
             int end = Math.min(start + batchSize, chunks.size());
-
-            // 截取当前批次 Chunk。
-            List<KnowledgeDocumentChunk> batch = chunks.subList(start, end);
-
-            // 提取当前批次文本。
-            List<String> texts = batch.stream()
-                    .map(KnowledgeDocumentChunk::getContent)
-                    .toList();
-
-            // 调用 Python Embedding 服务。
-            EmbeddingData embeddingData = embeddingClient.embed(texts, properties.getModel());
-
-            // 校验 Python 返回结果。
-            validateEmbeddingData(embeddingData, batch.size());
-
-            // 写入当前批次向量。
-            writeBatchEmbeddings(batch, embeddingData);
+            embedBatch(chunks.subList(start, end));
         }
     }
     private void validateEmbeddingData(EmbeddingData data, int expectedSize) {

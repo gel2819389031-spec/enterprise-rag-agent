@@ -1,18 +1,22 @@
 package com.example.rag.ingestion.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.example.rag.common.enums.IngestionTaskStatus;
 import com.example.rag.common.error.BaseErrorCode;
 import com.example.rag.common.error.BusinessException;
+import com.example.rag.common.error.ClientException;
 import com.example.rag.common.error.DatabaseException;
+import com.example.rag.common.context.UserContext;
 import com.example.rag.common.id.IdGenerator;
 import com.example.rag.ingestion.dto.IngestionTaskCreateCommand;
 import com.example.rag.ingestion.entity.IngestionTask;
 import com.example.rag.ingestion.entity.IngestionTaskStep;
 import com.example.rag.ingestion.mapper.IngestionTaskMapper;
 import com.example.rag.ingestion.mapper.IngestionTaskStepMapper;
+import com.example.rag.ingestion.pipeline.IngestionStepEvent;
+import com.example.rag.ingestion.pipeline.StepCode;
 import com.example.rag.ingestion.service.IngestionTaskService;
+import org.springframework.context.ApplicationEventPublisher;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataAccessException;
@@ -38,6 +42,7 @@ public class IngestionTaskServiceImpl implements IngestionTaskService {
     private final IngestionTaskMapper taskMapper;
     private final IngestionTaskStepMapper stepMapper;
     private final IdGenerator idGenerator;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Override
     public IngestionTask createDocumentIngestTask(IngestionTaskCreateCommand command) {
@@ -64,27 +69,31 @@ public class IngestionTaskServiceImpl implements IngestionTaskService {
         }
 
     }
+    @Override
+    @Deprecated
+    public void processDocument(Long documentId) {
+        IngestionTask task = getLatestTaskByDocumentId(documentId);
+        eventPublisher.publishEvent(new IngestionStepEvent(task.getId(),
+                task.getTenantId(), StepCode.first()));
+    }
 
     @Override
     public IngestionTask getTask(Long taskId) {
-        // 校验任务 ID。
         validateId(taskId, "任务 ID 不能为空");
-
-        // 查询任务主记录。
-        IngestionTask task = taskMapper.selectById(taskId);
+        Long tenantId = currentTenantIdRequired();
+        IngestionTask task = taskMapper.selectOne(
+                new LambdaQueryWrapper<IngestionTask>()
+                        .eq(IngestionTask::getId, taskId)
+                        .eq(IngestionTask::getTenantId, tenantId));
         if (task == null) {
-            throw new BusinessException(BaseErrorCode.CLIENT_ERROR, "任务不存在");
+            throw new BusinessException(BaseErrorCode.NOT_FOUND, "任务不存在");
         }
         return task;
     }
 
     @Override
     public List<IngestionTaskStep> listTaskSteps(Long taskId) {
-
-        // 校验任务 ID。
-        validateId(taskId, "任务 ID 不能为空");
-
-        // 查询任务步骤列表。
+        getTask(taskId); // 校验任务存在且属于当前租户
         return stepMapper.selectList(new LambdaQueryWrapper<IngestionTaskStep>()
                 .eq(IngestionTaskStep::getTaskId, taskId)
                 .orderByAsc(IngestionTaskStep::getId));
@@ -108,30 +117,47 @@ public class IngestionTaskServiceImpl implements IngestionTaskService {
         // 更新任务状态为处理失败，并记录失败原因。
         updateTaskStatus(taskId, IngestionTaskStatus.FAILED.getCode(), errorMessage);
     }
+
     @Override
-    public IngestionTask getLatestTaskByDocumentId(
-            Long documentId
-    ) {
-        // 根据文档 ID 查询最近创建的任务。
+    public void updateProgress(Long taskId, int progress) {
+        IngestionTask task = new IngestionTask();
+        task.setId(taskId);
+        task.setProgress(progress);
+        taskMapper.updateById(task);
+    }
+
+    @Override
+    public void updateStepStatus(Long taskId, String stepName, String status) {
+        IngestionTaskStep step = stepMapper.selectOne(
+                new LambdaQueryWrapper<IngestionTaskStep>()
+                        .eq(IngestionTaskStep::getTaskId, taskId)
+                        .eq(IngestionTaskStep::getStepName, stepName));
+        if (step == null) return;
+        Instant now = Instant.now();
+        step.setStatus(status);
+        if (IngestionTaskStatus.RUNNING.getCode().equals(status)) {
+            step.setStartedAt(now);
+        }
+        if (IngestionTaskStatus.SUCCESS.getCode().equals(status)
+                || IngestionTaskStatus.FAILED.getCode().equals(status)) {
+            step.setFinishedAt(now);
+        }
+        stepMapper.updateById(step);
+    }
+
+    @Override
+    public IngestionTask getLatestTaskByDocumentId(Long documentId) {
+        Long tenantId = currentTenantIdRequired();
         IngestionTask task = taskMapper.selectOne(
                 new LambdaQueryWrapper<IngestionTask>()
-                        .eq(
-                                IngestionTask::getDocumentId,
-                                documentId
-                        )
-                        .orderByDesc(
-                                IngestionTask::getCreatedAt
-                        )
+                        .eq(IngestionTask::getDocumentId, documentId)
+                        .eq(IngestionTask::getTenantId, tenantId)
+                        .orderByDesc(IngestionTask::getCreatedAt)
                         .last("limit 1")
         );
-
         if (task == null) {
-            throw new BusinessException(
-                    BaseErrorCode.NOT_FOUND,
-                    "文档入库任务不存在"
-            );
+            throw new BusinessException(BaseErrorCode.NOT_FOUND, "文档入库任务不存在");
         }
-
         return task;
     }
     private void initTaskSteps(Long taskId) {
@@ -205,6 +231,18 @@ public class IngestionTaskServiceImpl implements IngestionTaskService {
     private void validateId(Long id, String message) {
         if (id == null || id <= 0) {
             throw new BusinessException(BaseErrorCode.CLIENT_ERROR, message);
+        }
+    }
+
+    private Long currentTenantIdRequired() {
+        String tenantId = UserContext.tenantId();
+        if (tenantId == null || tenantId.isBlank()) {
+            throw new ClientException(BaseErrorCode.UNAUTHORIZED, "缺少租户上下文");
+        }
+        try {
+            return Long.valueOf(tenantId);
+        } catch (NumberFormatException ex) {
+            throw new ClientException(BaseErrorCode.BAD_REQUEST, "租户 ID 必须是数字");
         }
     }
 }

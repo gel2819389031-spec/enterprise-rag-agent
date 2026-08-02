@@ -33,6 +33,21 @@ public final class FileHashUtils {
         }
     }
 
+    /**
+     * 从已读入内存的字节数组计算 SHA-256 哈希。
+     *
+     * <p>用于避免重复读取 MultipartFile 的 InputStream，
+     * 调用方先将文件一次性读入 byte[]，然后 hash 和 upload 共用同一份字节。</p>
+     */
+    public static String sha256Hex(byte[] content) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            return toHex(digest.digest(content));
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IllegalStateException("SHA-256 algorithm not available", ex);
+        }
+    }
+
     private static String toHex(byte[] bytes) {
         StringBuilder builder = new StringBuilder(bytes.length * 2);
         for (byte item : bytes) {

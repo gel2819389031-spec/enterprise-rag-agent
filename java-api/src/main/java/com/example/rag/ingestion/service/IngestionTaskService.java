@@ -16,6 +16,7 @@ public interface IngestionTaskService {
      */
     IngestionTask createDocumentIngestTask(IngestionTaskCreateCommand command);
 
+    public void  processDocument ( Long documentId);
     /**
      * 根据任务 ID 查询任务主信息。
      */
@@ -40,6 +41,17 @@ public interface IngestionTaskService {
      * 标记任务执行失败。
      */
     void markTaskFailed(Long taskId, String errorMessage);
+    /**
+     * 更新任务进度百分比（0-100）。
+     */
+    void updateProgress(Long taskId, int progress);
+    /**
+     * 更新指定步骤的状态。
+     * @param taskId   任务 ID
+     * @param stepName 步骤名称（如 "文档解析"、"向量生成"）
+     * @param status   新状态（RUNNING / SUCCESS / FAILED）
+     */
+    void updateStepStatus(Long taskId, String stepName, String status);
     /**
      * 查询文档最新的入库任务。
      */

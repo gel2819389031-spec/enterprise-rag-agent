@@ -3,6 +3,8 @@ package com.example.rag.ingestion.pipeline;
 import com.example.rag.common.enums.IngestionTaskStatus;
 import com.example.rag.ingestion.entity.IngestionTask;
 import com.example.rag.ingestion.service.IngestionTaskService;
+import com.example.rag.knowledge.enums.DocumentProcessStatus;
+import com.example.rag.knowledge.service.KnowledgeDocumentService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -22,9 +24,12 @@ import org.springframework.transaction.annotation.Transactional;
 public abstract class PipelineStep {
 
     protected final IngestionTaskService taskService;
+    protected final KnowledgeDocumentService documentService;
 
-    protected PipelineStep(IngestionTaskService taskService) {
+    protected PipelineStep(IngestionTaskService taskService,
+                           KnowledgeDocumentService documentService) {
         this.taskService = taskService;
+        this.documentService = documentService;
     }
 
     /** 本步骤编码 */
@@ -47,6 +52,13 @@ public abstract class PipelineStep {
             log.error("步骤失败, step={}, taskId={}", code(), taskId, ex);
             updateStepStatus(taskId, IngestionTaskStatus.FAILED);
             taskService.markTaskFailed(taskId, safeMessage(ex));
+            try {
+                IngestionTask task = taskService.getTask(taskId);
+                documentService.markParseStatus(task.getDocumentId(),
+                        DocumentProcessStatus.FAILED.getCode());
+            } catch (Exception ignored) {
+                log.warn("更新文档失败状态时异常, taskId={}", taskId, ignored);
+            }
             throw new StepFailedException(code(), taskId, ex);
         }
     }

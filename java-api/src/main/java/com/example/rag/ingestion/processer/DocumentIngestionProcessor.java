@@ -12,6 +12,7 @@ import com.example.rag.ingestion.parser.DocumentParser;
 import com.example.rag.ingestion.parser.ParsedDocument;
 import com.example.rag.ingestion.service.IngestionTaskService;
 import com.example.rag.knowledge.entity.KnowledgeDocument;
+import com.example.rag.knowledge.enums.DocumentProcessStatus;
 import com.example.rag.knowledge.entity.KnowledgeDocumentChunk;
 import com.example.rag.knowledge.mapper.KnowledgeDocumentChunkMapper;
 import com.example.rag.knowledge.service.KnowledgeDocumentService;
@@ -22,6 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.io.InputStream;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -39,6 +41,7 @@ public class DocumentIngestionProcessor {
     private static final String DEFAULT_CHUNKER_TYPE = "recursive";
 
     private final IngestionTaskService ingestionTaskService;
+
     private final KnowledgeDocumentService documentService;
     private final KnowledgeDocumentChunkMapper chunkMapper;
     private final ObjectStorageService objectStorageService;
@@ -48,48 +51,50 @@ public class DocumentIngestionProcessor {
     private final IdGenerator idGenerator;
 
     /**
-     * 执行文档解析、切分和 Chunk 入库。
+     * 执行文档解析、切分和 Chunk 入库（含任务状态管理）。
+     *
+     * @deprecated 新代码请使用 {@link #parseAndSaveChunks(Long)} + 流水线编排。
      */
     @Transactional(rollbackFor = Exception.class)
+    @Deprecated
     public void process(Long taskId) {
         try {
-            // 查询任务主信息。
             IngestionTask task = ingestionTaskService.getTask(taskId);
-
-            // 标记任务开始执行。
             ingestionTaskService.markTaskRunning(taskId);
 
-            // 查询任务对应的文档。
-            KnowledgeDocument document = documentService.getDocument(task.getDocumentId());
+            parseAndSaveChunks(taskId);
 
-            // 下载并解析文档。
-            ParsedDocument parsedDocument = parseDocument(document);
-
-            // 清洗解析后的文本。
-            String normalizedText = textNormalizer.normalize(parsedDocument.getText());
-
-            // 通过工厂获取切分器。
-            TextChunker chunker = textChunkerFactory.getChunker(DEFAULT_CHUNKER_TYPE);
-
-            // 执行文本切分。
-            List<TextChunk> chunks = chunker.chunk(normalizedText, DEFAULT_CHUNK_SIZE, DEFAULT_OVERLAP);
-
-            // 保存 Chunk。
-            saveChunks(task, document, chunks, chunker.type());
-
-            // 更新文档解析状态。
-            documentService.markParseStatus(document.getId(), "PARSED");
-
-            // 标记任务处理成功。
+            documentService.markParseStatus(task.getDocumentId(),
+                    DocumentProcessStatus.PARSED.getCode());
             ingestionTaskService.markTaskSuccess(taskId);
         } catch (Exception ex) {
             log.error("文档入库处理失败, taskId={}", taskId, ex);
-
-            // 标记任务失败。
             ingestionTaskService.markTaskFailed(taskId, safeErrorMessage(ex));
             throw new DocumentIngestionException(taskId, ex);
-
         }
+    }
+
+    /**
+     * 执行文档解析、切分和 Chunk 入库（不含任务状态管理）。
+     *
+     * <p>供流水线 {@link com.example.rag.ingestion.pipeline.ParseStep} 调用。
+     * 任务状态由调用方（PipelineStep 基类）统一管理。</p>
+     *
+     * @param taskId 入库任务 ID
+     * @return 生成的 Chunk 数量
+     */
+    public int parseAndSaveChunks(Long taskId) {
+        IngestionTask task = ingestionTaskService.getTask(taskId);
+        KnowledgeDocument document = documentService.getDocument(task.getDocumentId());
+
+        ParsedDocument parsedDocument = parseDocument(document);
+        String normalizedText = textNormalizer.normalize(parsedDocument.getText());
+
+        TextChunker chunker = textChunkerFactory.getChunker(DEFAULT_CHUNKER_TYPE);
+        List<TextChunk> chunks = chunker.chunk(normalizedText, DEFAULT_CHUNK_SIZE, DEFAULT_OVERLAP);
+
+        saveChunks(task, document, chunks, chunker.type());
+        return chunks.size();
     }
 
     private ParsedDocument parseDocument(KnowledgeDocument document) {
@@ -110,8 +115,8 @@ public class DocumentIngestionProcessor {
 
         Instant now = Instant.now();
 
+        List<KnowledgeDocumentChunk> entities = new ArrayList<>(chunks.size());
         for (TextChunk chunk : chunks) {
-            // 构造 Chunk 实体。
             KnowledgeDocumentChunk entity = new KnowledgeDocumentChunk();
             entity.setId(idGenerator.nextId());
             entity.setTenantId(task.getTenantId());
@@ -125,10 +130,12 @@ public class DocumentIngestionProcessor {
             entity.setCreatedAt(now);
             entity.setUpdatedAt(now);
             entity.setDeleted(false);
-
-            // 插入 Chunk。
-            chunkMapper.insert(entity);
+            entities.add(entity);
         }
+        // 批量插入，避免 N+1 JDBC round-trip
+        chunkMapper.insert(entities);
+
+
     }
 
     private String buildMetadata(String fileName, String chunkerType, TextChunk chunk) {

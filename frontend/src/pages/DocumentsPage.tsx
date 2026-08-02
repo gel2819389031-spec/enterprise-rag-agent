@@ -10,7 +10,16 @@ import {
 import { useParams } from 'react-router-dom';
 import { documentApi, kbApi, taskApi } from '../api/modules';
 import { PageHeader } from '../components/PageHeader';
-import type { DocumentChunk, IngestionTask, KnowledgeDocument } from '../types/api';
+import type { DocumentChunk, DocumentParseStatus, IngestionTask, KnowledgeDocument } from '../types/api';
+
+const PARSE_STATUS_LABEL: Record<DocumentParseStatus, { color: string; text: string }> = {
+  PENDING:    { color: 'default',    text: '排队中' },
+  PROCESSING: { color: 'processing', text: '解析切分中' },
+  PARSED:     { color: 'warning',    text: '已解析，等待向量化' },
+  EMBEDDING:  { color: 'processing', text: '向量化中' },
+  READY:      { color: 'success',    text: '处理完成' },
+  FAILED:     { color: 'error',      text: '处理失败' },
+};
 
 /** 轮询任务进度（每 2 秒），直到任务进入终态 */
 function useTaskPolling(documentId: string | undefined) {
@@ -101,22 +110,49 @@ export function DocumentsPage() {
           message="文档数据加载失败" description={(kb.error ?? docs.error)?.message} />
       )}
 
-      {/* 正在处理的任务进度条 */}
-      {taskPoll.data && taskPoll.data.status !== 'SUCCESS' && (
-        <Card size="small" style={{ marginBottom: 16 }}>
-          <Space>
-            <span>正在处理文档：</span>
-            <Progress percent={taskPoll.data.progress} size="small" style={{ width: 200 }} />
-            <Tag color="processing">{taskPoll.data.status}</Tag>
-            {taskPoll.data.status === 'FAILED' && (
-              <Button size="small" icon={<ReloadOutlined />}
-                onClick={() => retryTask.mutate(taskPoll.data.id)} loading={retryTask.isPending}>
-                重试
-              </Button>
-            )}
-          </Space>
-        </Card>
-      )}
+      {/* 正在处理 / 已查看进度的任务 */}
+      {taskPoll.data && (() => {
+        const docStatus = docs.data?.find(d => d.id === trackingDocId)?.parseStatus;
+        const statusLabel = docStatus ? PARSE_STATUS_LABEL[docStatus as DocumentParseStatus] : null;
+        return (
+          <Card size="small" style={{ marginBottom: 16 }}>
+            <Space direction="vertical" style={{ width: '100%' }}>
+              <Space>
+                <span>任务进度：</span>
+                <Progress
+                  percent={taskPoll.data.progress}
+                  size="small"
+                  style={{ width: 200 }}
+                  status={taskPoll.data.status === 'FAILED' ? 'exception' : undefined}
+                />
+                <Tag color={
+                  taskPoll.data.status === 'SUCCESS' ? 'success' :
+                  taskPoll.data.status === 'FAILED' ? 'error' : 'processing'
+                }>{taskPoll.data.status}</Tag>
+                {taskPoll.data.status === 'FAILED' && (
+                  <Button size="small" icon={<ReloadOutlined />}
+                    onClick={() => retryTask.mutate(taskPoll.data.id)} loading={retryTask.isPending}>
+                    重试
+                  </Button>
+                )}
+                {taskPoll.data.status !== 'RUNNING' && taskPoll.data.status !== 'PENDING' && (
+                  <Button size="small" onClick={() => setTrackingDocId(undefined)}>收起</Button>
+                )}
+              </Space>
+              {statusLabel && (
+                <Space>
+                  <span>当前步骤：</span>
+                  <Tag color={statusLabel.color}>{docStatus}</Tag>
+                  <span>{statusLabel.text}</span>
+                </Space>
+              )}
+              {taskPoll.data.errorMessage && (
+                <div style={{ color: '#ff4d4f' }}>错误：{taskPoll.data.errorMessage}</div>
+              )}
+            </Space>
+          </Card>
+        );
+      })()}
 
       <Card className="upload-panel">
         <Upload.Dragger multiple showUploadList={false} beforeUpload={upload}>
@@ -146,11 +182,9 @@ export function DocumentsPage() {
             title: '处理状态',
             dataIndex: 'parseStatus',
             render: (v: string) => {
-              const color =
-                v === 'READY' ? 'success' :
-                v === 'FAILED' ? 'error' :
-                v === 'PARSED' ? 'warning' : 'processing';
-              return <Tag color={color}>{v}</Tag>;
+              const s = PARSE_STATUS_LABEL[v as DocumentParseStatus]
+                     ?? { color: 'default' as const, text: v };
+              return <Tag color={s.color}>{s.text}</Tag>;
             },
           },
           { title: '更新时间', dataIndex: 'updatedAt',
@@ -161,11 +195,9 @@ export function DocumentsPage() {
               <Space>
                 {!completedIds.has(r.id) && (
                   <Button size="small" icon={<ReloadOutlined />}
-                    onClick={() => {
-                      setTrackingDocId(r.id);
-                      void qc.invalidateQueries({ queryKey: ['task', r.id] });
-                    }}>
-                    查看进度
+                    loading={trackingDocId === r.id && taskPoll.isLoading}
+                    onClick={() => setTrackingDocId(trackingDocId === r.id ? undefined : r.id)}>
+                    {trackingDocId === r.id ? '收起进度' : '查看进度'}
                   </Button>
                 )}
                 <Button size="small" icon={<EyeOutlined />} onClick={() => setDoc(r)}>

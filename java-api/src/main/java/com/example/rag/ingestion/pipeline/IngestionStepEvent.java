@@ -5,28 +5,28 @@ import java.time.Instant;
 /**
  * 流水线步骤事件。
  *
- * <p>由上一个步骤在成功完成后发布，驱动下一个步骤执行。
- * 通过 Spring {@link org.springframework.context.ApplicationEventPublisher} 发布，
- * 由 {@link IngestionStepListener} 异步消费。</p>
+ * <p>携带租户 ID，供 @Async 线程恢复 {@link com.example.rag.common.context.UserContext}。</p>
  *
  * @param taskId   入库任务 ID
+ * @param tenantId 租户 ID（用于异步线程恢复上下文）
  * @param stepCode 当前需要执行的步骤
  * @param createdAt 事件创建时间
  */
 public record IngestionStepEvent(
         Long taskId,
+        Long tenantId,
         StepCode stepCode,
         Instant createdAt
 ) {
 
-    public IngestionStepEvent(Long taskId, StepCode stepCode) {
-        this(taskId, stepCode, Instant.now());
+    public IngestionStepEvent(Long taskId, Long tenantId, StepCode stepCode) {
+        this(taskId, tenantId, stepCode, Instant.now());
     }
 
     /**
-     * 创建下一步骤的事件。
+     * 创建下一步骤的事件，继承 tenantId。
      */
     public IngestionStepEvent next() {
-        return new IngestionStepEvent(taskId, stepCode.next());
+        return new IngestionStepEvent(taskId, tenantId, stepCode.next());
     }
 }

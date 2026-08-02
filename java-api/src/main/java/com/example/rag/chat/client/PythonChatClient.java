@@ -11,7 +11,6 @@ import com.example.rag.common.error.BaseErrorCode;
 import com.example.rag.common.error.RemoteException;
 import com.example.rag.embedding.config.EmbeddingClientProperties;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -34,11 +33,22 @@ import java.util.function.Consumer;
  */
 @Slf4j
 @Component
-@RequiredArgsConstructor
 public class PythonChatClient {
     private final EmbeddingClientProperties properties;
     private final ObjectMapper objectMapper;
     private final PythonSseEventParser sseEventParser;
+    private final HttpClient httpClient;
+
+    public PythonChatClient(EmbeddingClientProperties properties, ObjectMapper objectMapper,
+                            PythonSseEventParser sseEventParser) {
+        this.properties = properties;
+        this.objectMapper = objectMapper;
+        this.sseEventParser = sseEventParser;
+        this.httpClient = HttpClient.newBuilder()
+                .version(HttpClient.Version.HTTP_1_1)
+                .connectTimeout(Duration.ofSeconds(properties.getTimeoutSeconds()))
+                .build();
+    }
 
     public PythonChatData chat(PythonChatRequest requestBody) {
         try{
@@ -51,11 +61,7 @@ public class PythonChatClient {
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(json, StandardCharsets.UTF_8))
                     .build();
-            HttpClient client = HttpClient.newBuilder()
-                    .version(HttpClient.Version.HTTP_1_1)
-                    .connectTimeout(Duration.ofSeconds(properties.getTimeoutSeconds()))
-                    .build();
-            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString()); if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString()); if (response.statusCode() < 200 || response.statusCode() >= 300) {
                 log.error("调用 Python Chat 服务失败, status={}, body={}", response.statusCode(), response.body());
                 throw new RemoteException(BaseErrorCode.REMOTE_ERROR, "调用 Python Chat 服务失败");
             }
@@ -129,16 +135,7 @@ public class PythonChatClient {
                             )
                     )
                     .build();
-            // 创建支持 HTTP/1.1 的客户端。
-            HttpClient client = HttpClient.newBuilder()
-                    .version(HttpClient.Version.HTTP_1_1)
-                    .connectTimeout(
-                            Duration.ofSeconds(
-                                    properties.getTimeoutSeconds()
-                            )
-                    )
-                    .build();
-            HttpResponse<InputStream> response = client.send(
+            HttpResponse<InputStream> response = httpClient.send(
                     request,
                     HttpResponse.BodyHandlers.ofInputStream()
             );
