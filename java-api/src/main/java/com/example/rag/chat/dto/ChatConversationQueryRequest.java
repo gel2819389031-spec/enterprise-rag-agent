@@ -1,12 +1,13 @@
 package com.example.rag.chat.dto;
 
+import com.example.rag.common.api.PageQuery;
 import lombok.Data;
 
 /**
  * Chat 会话分页查询请求。
  */
 @Data
-public class ChatConversationQueryRequest {
+public class ChatConversationQueryRequest extends PageQuery {
 
     /**
      * 会话标题关键词。
@@ -18,13 +19,4 @@ public class ChatConversationQueryRequest {
      */
     private Long knowledgeBaseId;
 
-    /**
-     * 当前页码，从 1 开始。
-     */
-    private Long pageNo;
-
-    /**
-     * 每页大小。
-     */
-    private Long pageSize;
 }

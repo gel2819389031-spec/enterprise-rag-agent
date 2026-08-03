@@ -21,8 +21,10 @@ spring:
     enabled: true
     # Flyway 从 classpath 下扫描 SQL 脚本。
     locations: classpath:db/migration
-    # 如果目标库已有历史对象，可建立基线后继续迁移。
-    baseline-on-migrate: true
+    #默认禁止自动给非空数据库建立基线；
+    baseline-on-migrate: ${RAG_FLYWAY_BASELINE_ON_MIGRATE:false}
+    validate-on-migrate: true
+    clean-disabled: true
   servlet:
     multipart:
       max-file-size: 100MB

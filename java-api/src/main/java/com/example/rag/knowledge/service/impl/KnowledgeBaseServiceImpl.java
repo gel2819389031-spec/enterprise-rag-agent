@@ -87,9 +87,9 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
     @Override
     public PageResult<KnowledgeBase> pageKnowledgeBases(KnowledgeBaseQueryRequest request) {
         // 规范化页码，避免传入小于 1 的非法页码。
-        Long pageNo = normalizePageNo(request.getPageNo());
+        long pageNo = request.normalizedPageNo();
         // 规范化分页大小，避免一次查询过多数据。
-        Long pageSize = normalizePageSize(request.getPageSize());
+        long pageSize = request.normalizedPageSize();
         // 从用户上下文读取当前租户 ID，分页查询只返回当前租户的数据。
         Long tenantId = currentUserProvider.requireTenantId();
         // 构造基础查询条件：当前租户 + 按创建时间倒序。
@@ -106,7 +106,7 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
         // 执行 MyBatis-Plus 分页查询。
         Page<KnowledgeBase> page = knowledgeBaseMapper.selectPage(new Page<>(pageNo, pageSize), wrapper);
         // 将 MyBatis-Plus 分页结果转换成项目统一分页返回结构。
-        return PageResult.of(page.getRecords(), page.getTotal(), page.getCurrent(), page.getSize());
+        return PageResult.from(page);
     }
 
     /**
@@ -182,17 +182,6 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
                         currentUserProvider.requireTenantId()));
     }
 
-
-    private Long normalizePageNo(Long pageNo) {
-        return pageNo == null || pageNo < 1 ? 1L : pageNo;
-    }
-
-    private Long normalizePageSize(Long pageSize) {
-        if (pageSize == null || pageSize < 1) {
-            return 20L;
-        }
-        return Math.min(pageSize, 100L);
-    }
 
     private String defaultIfBlank(String value, String defaultValue) {
         return isBlank(value) ? defaultValue : value;

@@ -519,8 +519,11 @@ public class ChatServiceImpl implements ChatService {
         Long tenantId = currentUserProvider.requireTenantId();
         Long userId =
                 currentUserProvider.requireUserId();
-        Long pageNo = normalizePageNo(request == null ? null : request.getPageNo());
-        Long pageSize = normalizePageSize(request == null ? null : request.getPageSize());
+        ChatConversationQueryRequest pageRequest = request == null
+                ? new ChatConversationQueryRequest()
+                : request;
+        long pageNo = pageRequest.normalizedPageNo();
+        long pageSize = pageRequest.normalizedPageSize();
 
         LambdaQueryWrapper<ChatConversation> wrapper = new LambdaQueryWrapper<ChatConversation>()
                 .eq(ChatConversation::getTenantId, tenantId)
@@ -540,7 +543,7 @@ public class ChatServiceImpl implements ChatService {
         }
 
         Page<ChatConversation> page = conversationMapper.selectPage(new Page<>(pageNo, pageSize), wrapper);
-        return PageResult.of(page.getRecords(), page.getTotal(), page.getCurrent(), page.getSize());
+        return PageResult.from(page);
     }
 
     @Override
@@ -782,14 +785,4 @@ public class ChatServiceImpl implements ChatService {
 
 
 
-    private Long normalizePageNo(Long pageNo) {
-        return pageNo == null || pageNo < 1 ? 1L : pageNo;
-    }
-
-    private Long normalizePageSize(Long pageSize) {
-        if (pageSize == null || pageSize < 1) {
-            return 20L;
-        }
-        return Math.min(pageSize, 100L);
-    }
 }
