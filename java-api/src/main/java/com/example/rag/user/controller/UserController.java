@@ -2,6 +2,7 @@ package com.example.rag.user.controller;
 
 import com.example.rag.common.api.ApiResult;
 import com.example.rag.user.dto.UserCreateRequest;
+import com.example.rag.user.dto.UserResponse;
 import com.example.rag.user.entity.SysUser;
 import com.example.rag.user.service.UserService;
 import lombok.RequiredArgsConstructor;
@@ -30,7 +31,7 @@ public class UserController {
      */
     @PreAuthorize("hasRole('ADMIN')")
     @PostMapping
-    public ApiResult<SysUser> createUser(@RequestBody UserCreateRequest request) {
+    public ApiResult<UserResponse> createUser(@RequestBody UserCreateRequest request) {
 
         return ApiResult.ok(userService.createUser(request));
     }
@@ -39,7 +40,7 @@ public class UserController {
      * 查询用户详情。
      */
     @GetMapping("/{userId}")
-    public ApiResult<SysUser> getUser(@PathVariable("userId") Long userId) {
+    public ApiResult<UserResponse> getUser(@PathVariable("userId") Long userId) {
         return ApiResult.ok(userService.getUser(userId));
     }
 
@@ -47,7 +48,7 @@ public class UserController {
      * 在指定租户内按用户名查询用户。
      */
     @GetMapping("/by-username")
-    public ApiResult<SysUser> getByTenantAndUsername(@RequestParam("tenantId")Long tenantId,
+    public ApiResult<UserResponse> getByTenantAndUsername(@RequestParam("tenantId")Long tenantId,
                                                      @RequestParam( "username") String username) {
         return ApiResult.ok(userService.getByTenantAndUsername(tenantId, username));
     }

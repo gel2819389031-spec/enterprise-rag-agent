@@ -8,6 +8,7 @@ import com.example.rag.common.error.ClientException;
 import com.example.rag.common.error.DatabaseException;
 import com.example.rag.common.context.UserContext;
 import com.example.rag.common.id.IdGenerator;
+import com.example.rag.common.security.CurrentUserProvider;
 import com.example.rag.ingestion.dto.IngestionTaskCreateCommand;
 import com.example.rag.ingestion.entity.IngestionTask;
 import com.example.rag.ingestion.entity.IngestionTaskStep;
@@ -43,7 +44,7 @@ public class IngestionTaskServiceImpl implements IngestionTaskService {
     private final IngestionTaskStepMapper stepMapper;
     private final IdGenerator idGenerator;
     private final ApplicationEventPublisher eventPublisher;
-
+    private final CurrentUserProvider currentUserProvider;
     @Override
     @Transactional(rollbackFor = Exception.class)
     public IngestionTask createDocumentIngestTask(IngestionTaskCreateCommand command) {
@@ -81,7 +82,7 @@ public class IngestionTaskServiceImpl implements IngestionTaskService {
     @Override
     public IngestionTask getTask(Long taskId) {
         validateId(taskId, "任务 ID 不能为空");
-        Long tenantId = currentTenantIdRequired();
+        Long tenantId = currentUserProvider.requireTenantId();
         IngestionTask task = taskMapper.selectOne(
                 new LambdaQueryWrapper<IngestionTask>()
                         .eq(IngestionTask::getId, taskId)
@@ -148,7 +149,7 @@ public class IngestionTaskServiceImpl implements IngestionTaskService {
 
     @Override
     public IngestionTask getLatestTaskByDocumentId(Long documentId) {
-        Long tenantId = currentTenantIdRequired();
+        Long tenantId = currentUserProvider.requireTenantId();
         IngestionTask task = taskMapper.selectOne(
                 new LambdaQueryWrapper<IngestionTask>()
                         .eq(IngestionTask::getDocumentId, documentId)
@@ -235,15 +236,4 @@ public class IngestionTaskServiceImpl implements IngestionTaskService {
         }
     }
 
-    private Long currentTenantIdRequired() {
-        String tenantId = UserContext.tenantId();
-        if (tenantId == null || tenantId.isBlank()) {
-            throw new ClientException(BaseErrorCode.UNAUTHORIZED, "缺少租户上下文");
-        }
-        try {
-            return Long.valueOf(tenantId);
-        } catch (NumberFormatException ex) {
-            throw new ClientException(BaseErrorCode.BAD_REQUEST, "租户 ID 必须是数字");
-        }
-    }
 }

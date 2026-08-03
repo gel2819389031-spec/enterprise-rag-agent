@@ -74,6 +74,37 @@ public class RagTraceResponse {
     private String errorMessage;
 
     /**
+     * LLM Token 用量。
+     */
+    private JsonNode tokenUsage;
+
+    /**
+     * 请求过程中的降级原因。
+     */
+    private JsonNode degradedReasons;
+
+    /**
+     * 服务端开始处理时间。
+     */
+    private Instant startedAt;
+
+    /**
+     * 服务端结束处理时间。
+     */
+    private Instant finishedAt;
+
+    /**
+     * 数据解析是否发生错误。
+     */
+    @Builder.Default
+    private boolean parseError;
+
+    /**
+     * 解析错误详情。
+     */
+    private String parseErrorMessage;
+
+    /**
      * Trace 创建时间。
      */
     private Instant createdAt;

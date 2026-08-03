@@ -8,6 +8,7 @@ import com.example.rag.common.error.BaseErrorCode;
 import com.example.rag.common.error.BusinessException;
 import com.example.rag.common.error.ClientException;
 import com.example.rag.common.id.IdGenerator;
+import com.example.rag.common.security.CurrentUserProvider;
 import com.example.rag.knowledge.dto.KnowledgeBaseCreateRequest;
 import com.example.rag.knowledge.dto.KnowledgeBaseQueryRequest;
 import com.example.rag.knowledge.dto.KnowledgeBaseUpdateRequest;
@@ -17,6 +18,7 @@ import com.example.rag.knowledge.mapper.KnowledgeBaseMapper;
 import com.example.rag.knowledge.mapper.KnowledgeDocumentChunkMapper;
 import com.example.rag.knowledge.mapper.KnowledgeDocumentMapper;
 import com.example.rag.knowledge.service.KnowledgeBaseService;
+import com.example.rag.tenant.service.TenantService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -38,6 +40,7 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
     private final IdGenerator idGenerator;
     private final KnowledgeDocumentMapper documentMapper;
     private final KnowledgeDocumentChunkMapper chunkMapper;
+    private final CurrentUserProvider currentUserProvider;
 
     /**
      * 创建知识库，并绑定当前请求中的租户和创建人。
@@ -46,9 +49,9 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
     @Transactional(rollbackFor = Exception.class)
     public KnowledgeBase createKnowledgeBase(KnowledgeBaseCreateRequest request) {
         // 从用户上下文读取当前租户 ID，保证知识库属于当前租户。
-        Long tenantId = currentTenantIdRequired();
+        Long tenantId =  currentUserProvider.requireTenantId();
         // 从用户上下文读取当前用户 ID，用于记录创建人。
-        Long currentUserId = currentUserIdOrNull();
+        Long currentUserId = currentUserProvider.requireUserId();
         // 构造知识库实体，并补齐默认可见性、切片策略、状态和软删除标记。
         KnowledgeBase knowledgeBase = KnowledgeBase.builder()
                 .id(idGenerator.nextId())
@@ -88,7 +91,7 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
         // 规范化分页大小，避免一次查询过多数据。
         Long pageSize = normalizePageSize(request.getPageSize());
         // 从用户上下文读取当前租户 ID，分页查询只返回当前租户的数据。
-        Long tenantId = currentTenantIdRequired();
+        Long tenantId = currentUserProvider.requireTenantId();
         // 构造基础查询条件：当前租户 + 按创建时间倒序。
         LambdaQueryWrapper<KnowledgeBase> wrapper = new LambdaQueryWrapper<KnowledgeBase>()
                 .eq(KnowledgeBase::getTenantId, tenantId)
@@ -175,31 +178,10 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
         // 使用当前租户 ID 拼接查询条件，实现租户级数据隔离。
         return knowledgeBaseMapper.selectOne(new LambdaQueryWrapper<KnowledgeBase>()
                 .eq(KnowledgeBase::getId, knowledgeBaseId)
-                .eq(KnowledgeBase::getTenantId, currentTenantIdRequired()));
+                .eq( KnowledgeBase::getTenantId,
+                        currentUserProvider.requireTenantId()));
     }
 
-    private Long currentTenantIdRequired() {
-        String tenantId = UserContext.tenantId();
-        if (isBlank(tenantId)) {
-            throw new ClientException(BaseErrorCode.UNAUTHORIZED, "缺少租户上下文");
-        }
-        // 将请求头中的租户 ID 字符串转换为 Long。
-        return parseLong(tenantId, "租户 ID 必须是数字");
-    }
-
-    private Long currentUserIdOrNull() {
-        String userId = UserContext.userId();
-        // 未登录或没有用户上下文时，创建人允许为空。
-        return isBlank(userId) ? null : parseLong(userId, "用户 ID 必须是数字");
-    }
-
-    private Long parseLong(String value, String errorMessage) {
-        try {
-            return Long.valueOf(value);
-        } catch (NumberFormatException ex) {
-            throw new ClientException(BaseErrorCode.BAD_REQUEST, errorMessage);
-        }
-    }
 
     private Long normalizePageNo(Long pageNo) {
         return pageNo == null || pageNo < 1 ? 1L : pageNo;

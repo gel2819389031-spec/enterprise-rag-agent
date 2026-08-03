@@ -90,6 +90,28 @@ public class RagTrace {
     private String errorMessage;
 
     /**
+     * LLM Token 用量，JSONB 格式。
+     */
+    @TableField(typeHandler = JsonbTypeHandler.class)
+    private String tokenUsage;
+
+    /**
+     * 请求过程中发生的降级原因，JSONB 格式。
+     */
+    @TableField(typeHandler = JsonbTypeHandler.class)
+    private String degradedReasons;
+
+    /**
+     * 服务端开始处理时间。
+     */
+    private Instant startedAt;
+
+    /**
+     * 服务端结束处理时间。
+     */
+    private Instant finishedAt;
+
+    /**
      * Trace 创建时间。
      */
     @TableField(fill = FieldFill.INSERT)

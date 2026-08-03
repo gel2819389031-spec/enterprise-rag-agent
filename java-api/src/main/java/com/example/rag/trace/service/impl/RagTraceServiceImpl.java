@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.example.rag.chat.client.dto.PythonRagTraceData;
 import com.example.rag.common.error.BaseErrorCode;
 import com.example.rag.common.error.ClientException;
+import com.example.rag.common.security.CurrentUserProvider;
 import com.example.rag.trace.dto.RagTraceResponse;
 import com.example.rag.trace.entity.RagTrace;
 import com.example.rag.trace.mapper.RagTraceMapper;
@@ -33,6 +34,7 @@ public class RagTraceServiceImpl implements RagTraceService {
 
     private final RagTraceMapper traceMapper;
     private final ObjectMapper objectMapper;
+    private final CurrentUserProvider currentUserProvider;
 
     @Override
     @Transactional(
@@ -54,22 +56,18 @@ public class RagTraceServiceImpl implements RagTraceService {
                 .tenantId(tenantId)
                 .conversationId(conversationId)
                 .messageId(messageId)
-                .traceType(defaultString(
-                        traceData.getTraceType(),
-                        "CHAT_QA"
-                ))
+                .traceType(defaultString(traceData.getTraceType(), "CHAT_QA"))
                 .requestId(traceData.getRequestId())
                 .input(toJson(traceData.getInput(), "{}"))
                 .output(toJson(traceData.getOutput(), "{}"))
                 .nodes(toJson(traceData.getNodes(), "[]"))
+                .tokenUsage(toJson(traceData.getTokenUsage(), "{}"))
+                .degradedReasons(toJson(traceData.getDegradedReasons(), "[]"))
+                .startedAt(traceData.getStartedAt())
+                .finishedAt(traceData.getFinishedAt())
                 .latencyMs(traceData.getLatencyMs())
-                .status(defaultString(
-                        traceData.getStatus(),
-                        "SUCCESS"
-                ))
-                .errorMessage(limitError(
-                        traceData.getErrorMessage()
-                ))
+                .status(defaultString(traceData.getStatus(), "SUCCESS"))
+                .errorMessage(limitError(traceData.getErrorMessage()))
                 .build();
 
         traceMapper.insert(trace);
@@ -126,7 +124,7 @@ public class RagTraceServiceImpl implements RagTraceService {
         }
 
         // 从可信用户上下文中取得租户 ID。
-        Long tenantId = currentTenantIdRequired();
+        Long tenantId = currentUserProvider.requireTenantId();
 
         // 查询时同时加入 tenant_id，避免跨租户读取。
         RagTrace trace = traceMapper.selectOne(
@@ -157,7 +155,7 @@ public class RagTraceServiceImpl implements RagTraceService {
             );
         }
 
-        Long tenantId = currentTenantIdRequired();
+        Long tenantId = currentUserProvider.requireTenantId();
 
         // 按创建时间升序返回一次会话中的 Trace。
         return traceMapper.selectList(
@@ -191,7 +189,7 @@ public class RagTraceServiceImpl implements RagTraceService {
             return objectMapper.writeValueAsString(value);
         } catch (JsonProcessingException exception) {
             log.error("序列化 Trace JSON 失败", exception);
-            return defaultJson;
+            throw new RuntimeException("序列化 Trace JSON 失败", exception);  // ← 改这里
         }
     }
 
@@ -237,6 +235,10 @@ public class RagTraceServiceImpl implements RagTraceService {
                 .input(readJson(trace.getInput(), false))
                 .output(readJson(trace.getOutput(), false))
                 .nodes(readJson(trace.getNodes(), true))
+                .tokenUsage(readJson(trace.getTokenUsage(), false))
+                .degradedReasons(readJson(trace.getDegradedReasons(), true))
+                .startedAt(trace.getStartedAt())
+                .finishedAt(trace.getFinishedAt())
                 .latencyMs(trace.getLatencyMs())
                 .status(trace.getStatus())
                 .errorMessage(trace.getErrorMessage())
@@ -272,28 +274,7 @@ public class RagTraceServiceImpl implements RagTraceService {
                     : objectMapper.createObjectNode();
         }
     }
-    /**
-     * 从用户上下文取得当前租户 ID。
-     */
-    private Long currentTenantIdRequired() {
-        String tenantId = UserContext.tenantId();
 
-        if (!StringUtils.hasText(tenantId)) {
-            throw new ClientException(
-                    BaseErrorCode.UNAUTHORIZED,
-                    "缺少租户上下文"
-            );
-        }
-
-        try {
-            return Long.valueOf(tenantId);
-        } catch (NumberFormatException exception) {
-            throw new ClientException(
-                    BaseErrorCode.BAD_REQUEST,
-                    "租户 ID 必须是数字"
-            );
-        }
-    }
     private String limitText(
             String text,
             int maxLength

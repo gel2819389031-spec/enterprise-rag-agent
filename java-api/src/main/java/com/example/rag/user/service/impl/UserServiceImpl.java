@@ -8,11 +8,14 @@ import com.example.rag.common.error.DatabaseException;
 import com.example.rag.common.id.IdGenerator;
 import com.example.rag.tenant.service.TenantService;
 import com.example.rag.user.dto.UserCreateRequest;
+import com.example.rag.user.dto.UserResponse;
 import com.example.rag.user.entity.SysUser;
 import com.example.rag.user.mapper.SysUserMapper;
 import com.example.rag.user.service.UserService;
+import com.fasterxml.jackson.databind.util.BeanUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.BeanUtils;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DuplicateKeyException;
@@ -42,7 +45,7 @@ public class UserServiceImpl implements UserService {
      */
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public SysUser createUser(UserCreateRequest request) {
+    public UserResponse createUser(UserCreateRequest request) {
         // 校验创建用户请求中的必填字段，避免空值进入数据库。
         validateCreateUser(request);
         SysUser user;
@@ -72,7 +75,10 @@ public class UserServiceImpl implements UserService {
             // 打印创建成功日志，方便按用户 ID、租户 ID 或用户名排查链路。
             log.info("User created, userId={}, tenantId={}, username={}",
                     user.getId(), user.getTenantId(), user.getUsername());
-            return user;
+
+            UserResponse userResponse=new UserResponse();
+            BeanUtils.copyProperties(user, userResponse);
+            return userResponse;
         } catch (DuplicateKeyException ex) {
             log.warn("Create user failed because username already exists, tenantId={}, username={}",
                     request.getTenantId(), request.getUsername(), ex);
@@ -92,14 +98,16 @@ public class UserServiceImpl implements UserService {
      * 根据用户 ID 查询用户；不存在时抛出统一业务异常。
      */
     @Override
-    public SysUser getUser(Long userId) {
+    public UserResponse getUser(Long userId) {
         try {
             // 根据主键查询用户，MyBatis-Plus 会自动过滤逻辑删除数据。
             SysUser user = userMapper.selectById(userId);
             if (user == null) {
                 throw new BusinessException(BaseErrorCode.NOT_FOUND, "用户不存在");
             }
-            return user;
+            UserResponse userResponse=new UserResponse();
+            BeanUtils.copyProperties(user, userResponse);
+            return userResponse;
         } catch (DataAccessException ex) {
             log.error("Get user failed because database access error, userId={}", userId, ex);
             throw new DatabaseException("查询用户失败，请稍后再试", ex);
@@ -110,12 +118,16 @@ public class UserServiceImpl implements UserService {
      * 在指定租户内按用户名查询用户，用于登录、鉴权或用户唯一性校验。
      */
     @Override
-    public SysUser getByTenantAndUsername(Long tenantId, String username) {
+    public UserResponse getByTenantAndUsername(Long tenantId, String username) {
         try {
             // 按租户 ID 和用户名查询用户，避免不同租户下同名用户互相影响。
-            return userMapper.selectOne(new LambdaQueryWrapper<SysUser>()
+            SysUser user= userMapper.selectOne(new LambdaQueryWrapper<SysUser>()
                     .eq(SysUser::getTenantId, tenantId)
                     .eq(SysUser::getUsername, username));
+
+            UserResponse userResponse=new UserResponse();
+            BeanUtils.copyProperties(user, userResponse);
+            return userResponse;
         } catch (DataAccessException ex) {
             log.error("Get user by username failed because database access error, tenantId={}, username={}",
                     tenantId, username, ex);
@@ -131,7 +143,9 @@ public class UserServiceImpl implements UserService {
     public void disableUser(Long userId) {
         try {
             // 禁用前先查询用户，确保用户存在且未被逻辑删除。
-            SysUser user = getUser(userId);
+            UserResponse userResponse = getUser(userId);
+            SysUser user = new SysUser();
+            BeanUtils.copyProperties(userResponse, user);
             // 将用户状态改为停用，保留历史业务数据。
             user.setStatus(0);
             // 按主键更新用户状态。

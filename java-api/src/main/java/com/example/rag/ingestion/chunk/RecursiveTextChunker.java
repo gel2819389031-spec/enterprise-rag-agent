@@ -106,8 +106,8 @@ public class RecursiveTextChunker implements TextChunker {
             chunks.add(TextChunk.builder()
                     .chunkIndex(index)
                     .content(buffer.toString().trim())
-                    .startOffset(null)
-                    .endOffset(null)
+                    .startOffset(-1)
+                    .endOffset(-1)
                     .build());
         }
 

@@ -7,6 +7,7 @@ import com.example.rag.common.error.BusinessException;
 import com.example.rag.common.error.ClientException;
 import com.example.rag.common.error.ServiceException;
 import com.example.rag.common.id.IdGenerator;
+import com.example.rag.common.security.CurrentUserProvider;
 import com.example.rag.common.storage.ObjectStorageService;
 import com.example.rag.common.utils.FileHashUtils;
 import com.example.rag.ingestion.dto.IngestionTaskCreateCommand;
@@ -46,6 +47,7 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
     private final IngestionTaskService ingestionTaskService;
     private final IdGenerator idGenerator;
     private final ApplicationEventPublisher eventPublisher;
+    private final CurrentUserProvider currentUserProvider;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -87,7 +89,7 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
         command.setTenantId(knowledgeBase.getTenantId());
         command.setKnowledgeBaseId(knowledgeBaseId);
         command.setDocumentId(knowledgeDocument.getId());
-        command.setCreatedBy(Long.valueOf(Objects.requireNonNull(UserContext.userId())));
+        command.setCreatedBy(currentUserProvider.requireUserId());
         var task = ingestionTaskService.createDocumentIngestTask(command);
 
         // 发布流水线起始事件 → @Async 异步执行 PARSE → EMBED → COMPLETE
@@ -111,7 +113,7 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
         // 如果调用方未传解析状态，则默认进入待解析状态。
         document.setParseStatus(defaultIfBlank(document.getParseStatus(), DEFAULT_PARSE_STATUS));
         // 如果调用方未传创建人，则从当前用户上下文中读取。
-        document.setCreatedBy(document.getCreatedBy() == null ? currentUserIdOrNull() : document.getCreatedBy());
+        document.setCreatedBy(document.getCreatedBy() == null ? currentUserProvider.requireUserId() : document.getCreatedBy());
         // 调用 Mapper 将文档元数据写入数据库。
         documentMapper.insert(document);
         return document;
@@ -125,7 +127,7 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
         // 按文档 ID 和当前租户 ID 查询，避免跨租户读取文档。
         KnowledgeDocument document = documentMapper.selectOne(new LambdaQueryWrapper<KnowledgeDocument>()
                 .eq(KnowledgeDocument::getId, documentId)
-                .eq(KnowledgeDocument::getTenantId, currentTenantIdRequired()));
+                .eq(KnowledgeDocument::getTenantId,   currentUserProvider.requireUserId()));
         if (document == null) {
             throw new BusinessException(BaseErrorCode.NOT_FOUND, "文档不存在");
         }
@@ -172,28 +174,6 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
         documentMapper.deleteById(documentId);
     }
 
-    private Long currentTenantIdRequired() {
-        String tenantId = UserContext.tenantId();
-        if (isBlank(tenantId)) {
-            throw new ClientException(BaseErrorCode.UNAUTHORIZED, "缺少租户上下文");
-        }
-        // 将请求头中的租户 ID 字符串转换为 Long。
-        return parseLong(tenantId, "租户 ID 必须是数字");
-    }
-
-    private Long currentUserIdOrNull() {
-        String userId = UserContext.userId();
-        // 未登录或没有用户上下文时，创建人允许为空。
-        return isBlank(userId) ? null : parseLong(userId, "用户 ID 必须是数字");
-    }
-
-    private Long parseLong(String value, String errorMessage) {
-        try {
-            return Long.valueOf(value);
-        } catch (NumberFormatException ex) {
-            throw new ClientException(BaseErrorCode.BAD_REQUEST, errorMessage);
-        }
-    }
 
     private void validateUploadFile(MultipartFile file) {
         if (file == null || file.isEmpty()) {

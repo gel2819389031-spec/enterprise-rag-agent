@@ -6,6 +6,7 @@ import com.example.rag.common.context.LoginUser;
 import com.example.rag.common.context.UserContext;
 import com.example.rag.common.error.BaseErrorCode;
 import com.example.rag.common.error.ClientException;
+import com.example.rag.common.security.CurrentUserProvider;
 import com.example.rag.user.entity.SysUser;
 import com.example.rag.user.mapper.SysUserMapper;
 import lombok.RequiredArgsConstructor;
@@ -19,15 +20,15 @@ import org.springframework.stereotype.Service;
 public class CurrentUserServiceImpl implements CurrentUserService {
 
     private final SysUserMapper userMapper;
+    private final CurrentUserProvider currentUserProvider;
 
     @Override
     public CurrentUserResponse getCurrentUser() {
-        // 从当前请求的 UserContext 获取 JWT 身份。
-        LoginUser loginUser = UserContext.requireUser();
+        Long userId =
+                currentUserProvider.requireUserId();
 
-        // 将上下文中的字符串 ID 转换为数据库主键类型。
-        Long userId = Long.valueOf(loginUser.userId());
-        Long tenantId = Long.valueOf(loginUser.tenantId());
+        Long tenantId =
+                currentUserProvider.requireTenantId();
 
         // 查询数据库，避免返回 Token 中可能已经过时的信息。
         SysUser user = userMapper.selectById(userId);

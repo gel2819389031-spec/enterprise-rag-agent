@@ -25,6 +25,7 @@ import com.example.rag.common.error.BaseErrorCode;
 import com.example.rag.common.error.ClientException;
 import com.example.rag.common.error.RemoteException;
 import com.example.rag.common.id.IdGenerator;
+import com.example.rag.common.security.CurrentUserProvider;
 import com.example.rag.common.web.SseCloseReason;
 import com.example.rag.common.web.SseEmitterSender;
 import com.example.rag.trace.service.RagTraceService;
@@ -64,6 +65,7 @@ public class ChatServiceImpl implements ChatService {
     private final RagTraceService ragTraceService;
     private final ChatPersistenceService chatPersistenceService;
     private final Executor chatStreamExecutor;
+    private final CurrentUserProvider currentUserProvider;
 
     public ChatServiceImpl(PythonChatClient pythonChatClient,
                            ChatConversationMapper conversationMapper,
@@ -72,7 +74,8 @@ public class ChatServiceImpl implements ChatService {
                            ObjectMapper objectMapper,
                            RagTraceService ragTraceService,
                            ChatPersistenceService chatPersistenceService,
-                           @Qualifier("chatStreamExecutor") Executor chatStreamExecutor) {
+                           @Qualifier("chatStreamExecutor") Executor chatStreamExecutor,
+                           CurrentUserProvider currentUserProvider) {
         this.pythonChatClient = pythonChatClient;
         this.conversationMapper = conversationMapper;
         this.messageMapper = messageMapper;
@@ -81,6 +84,7 @@ public class ChatServiceImpl implements ChatService {
         this.ragTraceService = ragTraceService;
         this.chatPersistenceService = chatPersistenceService;
         this.chatStreamExecutor = chatStreamExecutor;
+        this.currentUserProvider = currentUserProvider;
     }
 
 
@@ -92,9 +96,8 @@ public class ChatServiceImpl implements ChatService {
         validateRequest(request);
 
         // 读取当前请求上下文，用于绑定租户、用户和权限边界。
-        LoginUser loginUser = UserContext.requireUser();
-        Long tenantId = parseLong(loginUser.tenantId(), "租户 ID 必须是数字");
-        Long userId = parseLong(loginUser.userId(), "用户 ID 必须是数字");
+        Long tenantId = currentUserProvider.requireTenantId();
+        Long userId = currentUserProvider.requireUserId();
         // 为本次 RAG 请求生成唯一 Trace 主键。
         Long traceId = idGenerator.nextId();
 
@@ -237,9 +240,8 @@ public class ChatServiceImpl implements ChatService {
     public SseEmitter streamChat(ChatRequest request) {
         // 在建立 SSE 连接前完成参数与登录上下文校验。
         validateRequest(request);
-        LoginUser loginUser = UserContext.requireUser();
-        Long tenantId = parseLong(loginUser.tenantId(), "租户 ID 必须是数字");
-        Long userId = parseLong(loginUser.userId(), "用户 ID 必须是数字");
+        Long tenantId = currentUserProvider.requireTenantId();
+        Long userId = currentUserProvider.requireUserId();
 
         // Java 生成 Trace ID，并用它关联 Java 与 Python 日志。
         Long traceId = idGenerator.nextId();
@@ -514,7 +516,7 @@ public class ChatServiceImpl implements ChatService {
     @Override
     public PageResult<ChatConversation> pageConversations(ChatConversationQueryRequest request) {
         // 读取当前租户，只返回当前租户自己的会话。
-        Long tenantId = currentTenantIdRequired();
+        Long tenantId = currentUserProvider.requireTenantId();
         Long pageNo = normalizePageNo(request == null ? null : request.getPageNo());
         Long pageSize = normalizePageSize(request == null ? null : request.getPageSize());
 
@@ -741,7 +743,7 @@ public class ChatServiceImpl implements ChatService {
             throw new ClientException(BaseErrorCode.BAD_REQUEST, "会话 ID 不能为空");
         }
         ChatConversation conversation = conversationMapper.selectById(conversationId);
-        validateTenantConversation(conversation, currentTenantIdRequired(), conversation.getUserId());
+        validateTenantConversation(conversation, currentUserProvider.requireTenantId(), conversation.getUserId());
         return conversation;
     }
 
@@ -772,21 +774,7 @@ public class ChatServiceImpl implements ChatService {
         }
     }
 
-    private Long currentTenantIdRequired() {
-        String tenantId = UserContext.tenantId();
-        if (!StringUtils.hasText(tenantId)) {
-            throw new ClientException(BaseErrorCode.UNAUTHORIZED, "缺少租户上下文");
-        }
-        return parseLong(tenantId, "租户 ID 必须是数字");
-    }
 
-    private Long parseLong(String value, String errorMessage) {
-        try {
-            return Long.valueOf(value);
-        } catch (NumberFormatException ex) {
-            throw new ClientException(BaseErrorCode.BAD_REQUEST, errorMessage);
-        }
-    }
 
     private Long normalizePageNo(Long pageNo) {
         return pageNo == null || pageNo < 1 ? 1L : pageNo;
