@@ -12,13 +12,17 @@ import com.example.rag.knowledge.dto.KnowledgeBaseCreateRequest;
 import com.example.rag.knowledge.dto.KnowledgeBaseQueryRequest;
 import com.example.rag.knowledge.dto.KnowledgeBaseUpdateRequest;
 import com.example.rag.knowledge.entity.KnowledgeBase;
+import com.example.rag.knowledge.entity.KnowledgeDocument;
 import com.example.rag.knowledge.mapper.KnowledgeBaseMapper;
+import com.example.rag.knowledge.mapper.KnowledgeDocumentChunkMapper;
+import com.example.rag.knowledge.mapper.KnowledgeDocumentMapper;
 import com.example.rag.knowledge.service.KnowledgeBaseService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.List;
 
 /**
  * 知识库服务实现。
@@ -32,6 +36,8 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
 
     private final KnowledgeBaseMapper knowledgeBaseMapper;
     private final IdGenerator idGenerator;
+    private final KnowledgeDocumentMapper documentMapper;
+    private final KnowledgeDocumentChunkMapper chunkMapper;
 
     /**
      * 创建知识库，并绑定当前请求中的租户和创建人。
@@ -132,10 +138,24 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void deleteKnowledgeBase(Long knowledgeBaseId) {
-        // 删除前先查询知识库，确保数据存在且属于当前租户。
-        getKnowledgeBase(knowledgeBaseId);
-        // 调用 MyBatis-Plus 删除方法，实际会根据 @TableLogic 执行逻辑删除。
+        KnowledgeBase kb = getKnowledgeBase(knowledgeBaseId);
+
+        // 1. 查该知识库下所有文档
+        List<KnowledgeDocument> docs = documentMapper.selectList(
+                new LambdaQueryWrapper<KnowledgeDocument>()
+                        .eq(KnowledgeDocument::getKnowledgeBaseId, knowledgeBaseId)
+                        .eq(KnowledgeDocument::getTenantId, kb.getTenantId()));
+
+        for (KnowledgeDocument doc : docs) {
+            // 2. 物理删除文档的 Chunk（释放 chunk_index UNIQUE 约束）
+            chunkMapper.deleteByDocumentIdPhysically(doc.getId());
+            // 3. 逻辑删除文档
+            documentMapper.deleteById(doc.getId());
+        }
+
+        // 4. 逻辑删除 KB
         knowledgeBaseMapper.deleteById(knowledgeBaseId);
+
     }
 
     /**
