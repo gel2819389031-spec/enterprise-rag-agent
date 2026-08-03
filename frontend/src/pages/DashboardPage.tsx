@@ -44,7 +44,7 @@ export function DashboardPage() {
           <Card>
             <Statistic
               title="知识库"
-              value={knowledgeBases.isError ? '不可用' : knowledgeBaseCount}
+              value={knowledgeBases.isError ? 0 : knowledgeBaseCount}
               prefix={<BookOutlined />}
             />
           </Card>
@@ -56,12 +56,12 @@ export function DashboardPage() {
         </Col>
         <Col span={6}>
           <Card>
-            <Statistic title="处理中任务" value="待接入" prefix={<ClockCircleOutlined />} />
+            <Statistic title="处理中任务" value={0} prefix={<ClockCircleOutlined />} />
           </Card>
         </Col>
         <Col span={6}>
           <Card>
-            <Statistic title="失败任务" value="待接入" prefix={<WarningOutlined />} />
+            <Statistic title="失败任务" value={0} prefix={<WarningOutlined />} />
           </Card>
         </Col>
       </Row>

@@ -91,7 +91,7 @@ export function DocumentsPage() {
   const upload = async (file: File) => {
     try {
       const doc = await documentApi.upload(knowledgeBaseId, file, (n) =>
-        setProgress((p) => ({ ...p, [file.name]: n })),
+        setProgress((p) => ({ ...p, [file.name + '_' + file.size + '_' + file.lastModified]: n })),
       );
       message.success(`${file.name} 上传成功，已自动开始处理`);
       setTrackingDocId(doc.id); // 开始轮询此文档的处理进度

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, App, Button, Form, Input, Modal, Popconfirm, Select, Space, Table, Tag } from 'antd';
 import { DeleteOutlined, EditOutlined, PlusOutlined, RightOutlined } from '@ant-design/icons';
@@ -12,10 +12,16 @@ export function KnowledgePage() {
     qc = useQueryClient(),
     { message } = App.useApp();
   const [page, setPage] = useState(1),
+    [search, setSearch] = useState(''),
     [keyword, setKeyword] = useState(''),
     [editing, setEditing] = useState<KnowledgeBase | null>(null),
     [open, setOpen] = useState(false);
   const [form] = Form.useForm<FormValue>();
+  // 搜索防抖 300ms
+  useEffect(() => {
+    const timer = setTimeout(() => setKeyword(search), 300);
+    return () => clearTimeout(timer);
+  }, [search]);
   const query = useQuery({
     queryKey: ['kb', page, keyword],
     queryFn: () => kbApi.page({ pageNo: page, pageSize: 10, keyword: keyword || undefined }),
@@ -58,7 +64,9 @@ export function KnowledgePage() {
         <Input.Search
           allowClear
           placeholder="搜索知识库"
-          onSearch={setKeyword}
+          value={search}
+          onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+          onSearch={(v) => setKeyword(v)}
           style={{ width: 320 }}
         />
       </div>

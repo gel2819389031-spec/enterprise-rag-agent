@@ -19,9 +19,10 @@ export function ChatPage() {
     [streaming, setStreaming] = useState(false);
   const abort = useRef<AbortController>();
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [convPage, setConvPage] = useState(1);
   const conversations = useQuery({
-      queryKey: ['conversations'],
-      queryFn: () => chatApi.conversations({ pageNo: 1, pageSize: 50 }),
+      queryKey: ['conversations', convPage],
+      queryFn: () => chatApi.conversations({ pageNo: convPage, pageSize: 50 }),
     }),
     kbs = useQuery({
       queryKey: ['kb', 'chat'],
@@ -133,6 +134,14 @@ export function ChatPage() {
               <Typography.Text ellipsis>{item.title || '未命名对话'}</Typography.Text>
             </List.Item>
           )}
+          loadMore={
+            (conversations.data?.total ?? 0) > convPage * 50 ? (
+              <Button block type="link" loading={conversations.isFetching}
+                onClick={() => setConvPage((p) => p + 1)}>
+                加载更多
+              </Button>
+            ) : undefined
+          }
         />
       </aside>
       <section className="chat-main">
