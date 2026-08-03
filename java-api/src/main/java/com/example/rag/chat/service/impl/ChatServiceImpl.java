@@ -727,6 +727,7 @@ public class ChatServiceImpl implements ChatService {
                 .eq(ChatMessage::getConversationId, conversationId)
                 .eq(ChatMessage::getDeleted, false)
                 .orderByDesc(ChatMessage::getCreatedAt)
+                        .orderByDesc(ChatMessage::getId)
                 .last("LIMIT " + HISTORY_LIMIT));
 
         // 再按时间正序传给 Python，保证消息顺序符合真实对话。
