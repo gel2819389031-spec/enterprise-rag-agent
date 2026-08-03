@@ -6,6 +6,8 @@ import org.springframework.stereotype.Component;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * ParagraphTextChunker
@@ -18,6 +20,11 @@ import java.util.List;
 @RequiredArgsConstructor
 public class ParagraphTextChunker implements TextChunker{
     private final FixedSizeTextChunker fixedSizeTextChunker;
+    private static final Pattern PARA_SEP = Pattern.compile("\\R\\s*\\R");
+    // 段落片段，携带在原文本中的起止偏移
+    private record Para(String content, int start, int end) {}
+
+
 
     @Override
     public List<TextChunk> chunk(String text, int chunkSize, int overlap) {
@@ -25,24 +32,23 @@ public class ParagraphTextChunker implements TextChunker{
         if (text == null || text.isBlank()) {
             return chunks;
         }
-        String[] paragraphs= Arrays.stream(text.split("\\R\\s*\\R"))
-                .map(String::trim)
-                .filter(p -> !p.isBlank())
-                .toArray(String[]::new);
+        // 用 Matcher 逐一提取段落，精确记录每个段落在原文中的 start/end
+        List<Para> paragraphs = extractParagraphs(text);
+
         StringBuilder buffer = new StringBuilder();
 
         int index = 0;
         int offset = 0;
         int chunkStart = 0;
-        for (String paragraph : paragraphs) {
-            if(paragraph.length()>chunkSize){
+        for (Para para : paragraphs) {
+            if(para.content.length() >chunkSize){
                 //先输出已经累积的段落内容
                 if(!buffer.isEmpty()){
                     chunks.add(buildChunk(index++, buffer.toString(), chunkStart, offset));
                     buffer.setLength(0);
                 }
                 // 超长段落降级为固定长度切分。
-                List<TextChunk> fixedChunks = fixedSizeTextChunker.chunk(paragraph, chunkSize, overlap);
+                List<TextChunk> fixedChunks = fixedSizeTextChunker.chunk(text.substring(para.start,para.end), chunkSize, overlap);
                 for (TextChunk fixedChunk : fixedChunks) {
                     fixedChunk.setChunkIndex(index++);
                     fixedChunk.setStartOffset(fixedChunk.getStartOffset() + offset);
@@ -50,28 +56,27 @@ public class ParagraphTextChunker implements TextChunker{
                     chunks.add(fixedChunk);
                 }
                 // 游标跳过当前超长段落（段落长度 + 被吃掉的 \n\n 两个字符）
-                offset += paragraph.length()+2;
-                chunkStart = offset;
+                chunkStart = para.end;
                 continue;
             }
-            if (buffer.length() + paragraph.length()+ (buffer.isEmpty() ? 0 : 2)> chunkSize) {
+            // 当前 buffer + 新段落超过 chunkSize → 输出一个 Chunk
+            int sepLen = buffer.isEmpty() ? 0 : 2; // 合并时用 \n\n 连接
+            if (buffer.length() + sepLen + para.content.length() > chunkSize) {
                 // 当前累计内容达到目标长度，输出一个 Chunk。
                 chunks.add(buildChunk(index++, buffer.toString(), chunkStart, offset));
-                //计算overlap
-                String remainingText = buffer.toString();
+                // overlap 回溯
+                String remaining = buffer.toString();
                 buffer.setLength(0);
-                int overlapStart = Math.max(0, remainingText.length() - overlap);
-                String overlapContent = remainingText.substring(overlapStart);
-                // 重新计算 buffer 的起始偏移量
-                chunkStart = offset - overlap- 2;
-                buffer.append(overlapContent);
+                int overlapStart = Math.max(0, remaining.length() - overlap);
+                buffer.append(remaining.substring(overlapStart));
+                chunkStart = para.start - (remaining.length() - overlapStart);
+
             }
 
             if (!buffer.isEmpty()) {
                 buffer.append("\n\n");
             }
-            buffer.append(paragraph);
-            offset += paragraph.length()+2;
+            buffer.append(para.content);
         }
         // 4. 处理循环结束后 buffer 中剩余的内容
         if (!buffer.isEmpty()) {
@@ -87,6 +92,26 @@ public class ParagraphTextChunker implements TextChunker{
                 .endOffset(end)
                 .build();
     }
+    /** 用 Matcher 提取段落，保留下每个段落在原文中的精确起止位置 */
+    private List<Para> extractParagraphs(String text) {
+        List<Para> result = new ArrayList<>();
+        Matcher matcher = PARA_SEP.matcher(text);
+        int pos = 0;
+        while (matcher.find()) {
+            String content = text.substring(pos, matcher.start()).trim();
+            if (!content.isBlank()) {
+                result.add(new Para(content, pos, matcher.start()));
+            }
+            pos = matcher.end(); // matcher.end() = 分隔符的实际结束位置
+        }
+        // 最后一个段落（后面没有分隔符）
+        String last = text.substring(pos).trim();
+        if (!last.isBlank()) {
+            result.add(new Para(last, pos, text.length()));
+        }
+        return result;
+    }
+
 
 
     @Override
