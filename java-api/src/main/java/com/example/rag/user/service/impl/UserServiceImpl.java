@@ -1,11 +1,14 @@
 package com.example.rag.user.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.example.rag.common.enums.UserRole;
 import com.example.rag.common.error.BaseErrorCode;
 import com.example.rag.common.error.BusinessException;
 import com.example.rag.common.error.ClientException;
 import com.example.rag.common.error.DatabaseException;
 import com.example.rag.common.id.IdGenerator;
+import com.example.rag.common.security.CurrentUserProvider;
+import com.example.rag.common.security.TenantAccessGuard;
 import com.example.rag.tenant.service.TenantService;
 import com.example.rag.user.dto.UserCreateRequest;
 import com.example.rag.user.dto.UserResponse;
@@ -39,6 +42,9 @@ public class UserServiceImpl implements UserService {
     private final SysUserMapper userMapper;
     private final TenantService tenantService;
     private final IdGenerator idGenerator;
+    private final CurrentUserProvider currentUserProvider;
+
+    private final TenantAccessGuard tenantAccessGuard;
 
     /**
      * 创建用户，并补齐默认角色、状态和软删除标记。
@@ -48,6 +54,36 @@ public class UserServiceImpl implements UserService {
     public UserResponse createUser(UserCreateRequest request) {
         // 校验创建用户请求中的必填字段，避免空值进入数据库。
         validateCreateUser(request);
+        // 校验当前操作者能否访问目标租户。
+        tenantAccessGuard.checkTenant(
+                request.getTenantId()
+        );
+        // 解析并校验目标用户角色。
+        UserRole targetRole =
+                UserRole.fromCode(
+                        request.getRoleCode()
+                );
+        // 获取当前操作者角色。
+        UserRole currentRole =
+                UserRole.fromCode(
+                        currentUserProvider.requireRole()
+                );
+        // 租户管理员只能创建普通用户。
+        if (currentRole == UserRole.ADMIN
+                && targetRole != UserRole.USER) {
+            throw new ClientException(
+                    BaseErrorCode.FORBIDDEN,
+                    "租户管理员只能创建普通用户"
+            );
+        }
+        // 只有平台管理员可以创建平台管理员。
+        if (targetRole == UserRole.PLATFORM_ADMIN
+                && currentRole != UserRole.PLATFORM_ADMIN) {
+            throw new ClientException(
+                    BaseErrorCode.FORBIDDEN,
+                    "只有平台管理员可以创建平台管理员"
+            );
+        }
         SysUser user;
         try {
             // 查询租户是否存在，避免用户绑定到不存在的租户。
@@ -60,13 +96,14 @@ public class UserServiceImpl implements UserService {
                     );
             user = SysUser.builder()
                     .id(idGenerator.nextId())
-                    .roleCode(isBlank(request.getRoleCode()) ? "USER" : request.getRoleCode())
                     .tenantId(request.getTenantId())
                     .username(request.getUsername())
                     .displayName(request.getDisplayName())
                     .email(request.getEmail())
-                    .roleCode(request.getRoleCode())
-                    .status(request.getStatus())
+                    .roleCode(targetRole.getCode())
+                    .status(request.getStatus() == null
+                            ? 1
+                            : request.getStatus())
                     .passwordHash(passwordHash)
                     .passwordChangedAt(Instant.now())
                     .build();
@@ -105,6 +142,10 @@ public class UserServiceImpl implements UserService {
             if (user == null) {
                 throw new BusinessException(BaseErrorCode.NOT_FOUND, "用户不存在");
             }
+            // 平台管理员可以跨租户，其他用户只能访问当前租户。
+            tenantAccessGuard.checkTenant(
+                    user.getTenantId()
+            );
             UserResponse userResponse=new UserResponse();
             BeanUtils.copyProperties(user, userResponse);
             return userResponse;
@@ -119,6 +160,7 @@ public class UserServiceImpl implements UserService {
      */
     @Override
     public UserResponse getByTenantAndUsername(Long tenantId, String username) {
+        tenantAccessGuard.checkTenant(tenantId);
         try {
             // 按租户 ID 和用户名查询用户，避免不同租户下同名用户互相影响。
             SysUser user= userMapper.selectOne(new LambdaQueryWrapper<SysUser>()
@@ -141,6 +183,15 @@ public class UserServiceImpl implements UserService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void disableUser(Long userId) {
+        Long currentUserId =
+                currentUserProvider.requireUserId();
+
+        if (currentUserId.equals(userId)) {
+            throw new ClientException(
+                    BaseErrorCode.BAD_REQUEST,
+                    "不能禁用当前登录账号"
+            );
+        }
         try {
             // 禁用前先查询用户，确保用户存在且未被逻辑删除。
             UserResponse userResponse = getUser(userId);

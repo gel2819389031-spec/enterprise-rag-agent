@@ -1,6 +1,7 @@
 package com.example.rag.user.entity;
 
 import com.baomidou.mybatisplus.annotation.*;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -46,6 +47,7 @@ public class SysUser {
     /**
      * BCrypt 密码哈希，不能保存明文密码。
      */
+    @JsonIgnore
     private String passwordHash;
 
     /**

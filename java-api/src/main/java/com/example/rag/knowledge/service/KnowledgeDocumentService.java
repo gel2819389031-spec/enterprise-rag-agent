@@ -1,6 +1,7 @@
 package com.example.rag.knowledge.service;
 
 import com.example.rag.knowledge.entity.KnowledgeDocument;
+import com.example.rag.knowledge.entity.KnowledgeDocumentChunk;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
@@ -11,6 +12,7 @@ import java.util.List;
  * <p>文档服务负责文档元数据登记和解析状态流转，真正的解析、切片、向量化会在后续入库任务中完成。</p>
  */
 public interface KnowledgeDocumentService {
+
 
 
 
@@ -52,4 +54,9 @@ public interface KnowledgeDocumentService {
      * <p>实际用途：管理端移除文档；底层应走逻辑删除，避免误删审计和历史任务数据。</p>
      */
     void deleteDocument(Long documentId);
+
+    List<KnowledgeDocumentChunk> listDocumentChunks(
+            Long documentId
+    );
+
 }

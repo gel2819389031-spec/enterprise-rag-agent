@@ -22,6 +22,9 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/users")
 @RequiredArgsConstructor
+@PreAuthorize(
+        "hasAnyRole('PLATFORM_ADMIN', 'ADMIN')"
+)
 public class UserController {
 
     private final UserService userService;
@@ -29,7 +32,6 @@ public class UserController {
     /**
      * 创建用户。
      */
-    @PreAuthorize("hasRole('ADMIN')")
     @PostMapping
     public ApiResult<UserResponse> createUser(@RequestBody UserCreateRequest request) {
 

@@ -1,6 +1,7 @@
 package com.example.rag.knowledge.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.example.rag.common.context.UserContext;
 import com.example.rag.common.error.BaseErrorCode;
 import com.example.rag.common.error.BusinessException;
@@ -16,7 +17,9 @@ import com.example.rag.ingestion.pipeline.StepCode;
 import com.example.rag.ingestion.service.IngestionTaskService;
 import com.example.rag.knowledge.entity.KnowledgeBase;
 import com.example.rag.knowledge.entity.KnowledgeDocument;
+import com.example.rag.knowledge.entity.KnowledgeDocumentChunk;
 import com.example.rag.knowledge.enums.DocumentProcessStatus;
+import com.example.rag.knowledge.mapper.KnowledgeDocumentChunkMapper;
 import com.example.rag.knowledge.mapper.KnowledgeDocumentMapper;
 import com.example.rag.knowledge.service.KnowledgeBaseService;
 import com.example.rag.knowledge.service.KnowledgeDocumentService;
@@ -48,6 +51,7 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
     private final IdGenerator idGenerator;
     private final ApplicationEventPublisher eventPublisher;
     private final CurrentUserProvider currentUserProvider;
+    private final KnowledgeDocumentChunkMapper chunkMapper;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -127,7 +131,7 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
         // 按文档 ID 和当前租户 ID 查询，避免跨租户读取文档。
         KnowledgeDocument document = documentMapper.selectOne(new LambdaQueryWrapper<KnowledgeDocument>()
                 .eq(KnowledgeDocument::getId, documentId)
-                .eq(KnowledgeDocument::getTenantId,   currentUserProvider.requireUserId()));
+                .eq(KnowledgeDocument::getTenantId,   currentUserProvider.requireTenantId()));
         if (document == null) {
             throw new BusinessException(BaseErrorCode.NOT_FOUND, "文档不存在");
         }
@@ -172,6 +176,30 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
         getDocument(documentId);
         // 调用 MyBatis-Plus 删除方法，实际会根据 @TableLogic 执行逻辑删除。
         documentMapper.deleteById(documentId);
+    }
+
+    @Override
+    public List<KnowledgeDocumentChunk> listDocumentChunks(Long documentId) {
+
+        // getDocument 内部校验当前租户。
+        KnowledgeDocument document =
+                getDocument(documentId);
+
+        return chunkMapper.selectList(
+                Wrappers
+                        .<KnowledgeDocumentChunk>lambdaQuery()
+                        .eq(
+                                KnowledgeDocumentChunk::getTenantId,
+                                document.getTenantId()
+                        )
+                        .eq(
+                                KnowledgeDocumentChunk::getDocumentId,
+                                document.getId()
+                        )
+                        .orderByAsc(
+                                KnowledgeDocumentChunk::getChunkIndex
+                        )
+        );
     }
 
 

@@ -30,7 +30,7 @@ import java.util.List;
 public class KnowledgeDocumentController {
 
     private final KnowledgeDocumentService documentService;
-    private final KnowledgeDocumentChunkMapper chunkMapper;
+
 
 
     /**
@@ -98,8 +98,6 @@ public class KnowledgeDocumentController {
      */
     @GetMapping("/{documentId}/chunks")
     public ApiResult<List<KnowledgeDocumentChunk>> listChunks(@PathVariable("documentId") Long documentId) {
-        return ApiResult.ok(chunkMapper.selectList(new LambdaQueryWrapper<KnowledgeDocumentChunk>()
-                .eq(KnowledgeDocumentChunk::getDocumentId, documentId)
-                .orderByAsc(KnowledgeDocumentChunk::getChunkIndex)));
+        return ApiResult.ok(documentService.listDocumentChunks(documentId));
     }
 }

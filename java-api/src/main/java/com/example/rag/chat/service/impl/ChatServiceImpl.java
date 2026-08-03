@@ -517,11 +517,17 @@ public class ChatServiceImpl implements ChatService {
     public PageResult<ChatConversation> pageConversations(ChatConversationQueryRequest request) {
         // 读取当前租户，只返回当前租户自己的会话。
         Long tenantId = currentUserProvider.requireTenantId();
+        Long userId =
+                currentUserProvider.requireUserId();
         Long pageNo = normalizePageNo(request == null ? null : request.getPageNo());
         Long pageSize = normalizePageSize(request == null ? null : request.getPageSize());
 
         LambdaQueryWrapper<ChatConversation> wrapper = new LambdaQueryWrapper<ChatConversation>()
                 .eq(ChatConversation::getTenantId, tenantId)
+                .eq(
+                        ChatConversation::getUserId,
+                        userId
+                )
                 .orderByDesc(ChatConversation::getUpdatedAt);
 
         if (request != null && request.getKnowledgeBaseId() != null) {
@@ -667,7 +673,7 @@ public class ChatServiceImpl implements ChatService {
     private ChatConversation getOrCreateConversation(ChatRequest request, Long tenantId, Long userId) {
         if (request.getConversationId() != null) {
             ChatConversation conversation = conversationMapper.selectById(request.getConversationId());
-            validateTenantConversation(conversation, tenantId,conversation.getUserId());
+            validateTenantConversation(conversation, tenantId,userId);
             return conversation;
         }
 
@@ -743,7 +749,7 @@ public class ChatServiceImpl implements ChatService {
             throw new ClientException(BaseErrorCode.BAD_REQUEST, "会话 ID 不能为空");
         }
         ChatConversation conversation = conversationMapper.selectById(conversationId);
-        validateTenantConversation(conversation, currentUserProvider.requireTenantId(), conversation.getUserId());
+        validateTenantConversation(conversation, currentUserProvider.requireTenantId(), currentUserProvider.requireUserId());
         return conversation;
     }
 
