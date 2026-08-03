@@ -43,6 +43,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -265,42 +266,48 @@ public class ChatServiceImpl implements ChatService {
         AtomicBoolean finalPersisted = new AtomicBoolean(false);
 
         // Python Client 会阻塞读取 SSE，因此放入专用线程池。
-        chatStreamExecutor.execute(() -> {
-            try {
-                pythonChatClient.streamChat(
-                        streamContext.getPythonRequest(),
-                        event -> {
-                            if (sender.isOpen()) {
-                                handlePythonStreamEvent(
-                                        event,
-                                        streamContext,
-                                        sender,
-                                        finalPersisted
-                                );
-                            }
-                        },
-                        streamSession
-                );
+        try{
+            chatStreamExecutor.execute(() -> {
+                try {
+                    pythonChatClient.streamChat(
+                            streamContext.getPythonRequest(),
+                            event -> {
+                                if (sender.isOpen()) {
+                                    handlePythonStreamEvent(
+                                            event,
+                                            streamContext,
+                                            sender,
+                                            finalPersisted
+                                    );
+                                }
+                            },
+                            streamSession
+                    );
 
-                // 流正常结束却没有成功入库 final，属于协议失败。
-                if (!finalPersisted.get()) {
-                    throw new IllegalStateException(
-                            "Python SSE stream ended without persisted final event"
+                    // 流正常结束却没有成功入库 final，属于协议失败。
+                    if (!finalPersisted.get()) {
+                        throw new IllegalStateException(
+                                "Python SSE stream ended without persisted final event"
+                        );
+                    }
+
+                    // complete() 会先记录 COMPLETED，再触发取消句柄。
+                    sender.complete();
+                } catch (Exception exception) {
+                    handleStreamException(
+                            exception,
+                            request,
+                            streamContext,
+                            sender,
+                            finalPersisted
                     );
                 }
-
-                // complete() 会先记录 COMPLETED，再触发取消句柄。
-                sender.complete();
-            } catch (Exception exception) {
-                handleStreamException(
-                        exception,
-                        request,
-                        streamContext,
-                        sender,
-                        finalPersisted
-                );
-            }
-        });
+            });
+        }catch (RejectedExecutionException ex){
+            saveStreamFailedTraceSafely(streamContext,request,ex);
+            emitter.completeWithError(ex);
+            throw ex;
+        }
 
         return emitter;
     }

@@ -136,7 +136,7 @@ public class SseEmitterSender {
             }
 
             return true;
-        } catch (IOException exception) {
+        } catch (Exception exception) {
             // 向前端写数据失败，通常意味着客户端已经断开。
             disconnect();
             return false;

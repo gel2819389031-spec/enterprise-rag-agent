@@ -5,6 +5,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 import java.util.concurrent.Executor;
+import java.util.concurrent.ThreadPoolExecutor;
 
 /**
  * ChatStreamExecutorConfig
@@ -47,6 +48,8 @@ public class ChatStreamExecutorConfig {
 
         // 最长等待 30 秒。
         executor.setAwaitTerminationSeconds(30);
+        // 满负载时可以降级为调用者线程执行，而不是直接丢弃：
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
 
         executor.initialize();
         return executor;

@@ -49,11 +49,7 @@ public class RefreshTokenServiceImpl implements RefreshTokenService {
     public TokenResponse refresh(String rawToken, String ip, String agent) {
         // 使用摘要查询，数据库不接触原始 Token。
         String tokenHash = generator.hashToken(rawToken);
-        AuthRefreshToken oldToken = tokenMapper.selectOne(
-                Wrappers.<AuthRefreshToken>lambdaQuery()
-                        .eq(AuthRefreshToken::getTokenHash, tokenHash)
-                        .last("LIMIT 1")
-        );
+        AuthRefreshToken oldToken = tokenMapper.selectByHashForUpdate(tokenHash);
         // Token 不存在、已撤销或已过期时拒绝刷新。
         Instant now = Instant.now();
         if (oldToken == null || oldToken.getRevokedAt() != null
