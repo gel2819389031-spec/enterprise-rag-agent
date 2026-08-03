@@ -37,9 +37,7 @@ public abstract class PipelineStep {
 
     /**
      * 执行本步骤。
-     * REQUIRES_NEW：挂起外层事务，在新事务中执行，独立提交。
      */
-    @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
     public void execute(Long taskId) {
         log.info("步骤开始, step={}, taskId={}", code(), taskId);
         try {

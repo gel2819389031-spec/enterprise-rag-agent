@@ -3,14 +3,14 @@ package com.example.rag.ingestion.controller;
 import com.example.rag.common.api.ApiResult;
 import com.example.rag.common.error.BaseErrorCode;
 import com.example.rag.common.error.BusinessException;
+import com.example.rag.common.security.CurrentUserProvider;
 import com.example.rag.embedding.service.ChunkEmbeddingService;
 import com.example.rag.ingestion.entity.IngestionTask;
 import com.example.rag.ingestion.entity.IngestionTaskStep;
-import com.example.rag.ingestion.pipeline.IngestionStepEvent;
+import com.example.rag.ingestion.event.IngestionTaskStartEvent;
 import com.example.rag.ingestion.pipeline.StepCode;
 import com.example.rag.ingestion.processer.DocumentIngestionProcessor;
 import com.example.rag.ingestion.service.IngestionTaskService;
-import com.example.rag.knowledge.service.KnowledgeDocumentService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.web.bind.annotation.*;
@@ -28,8 +28,8 @@ public class IngestionTaskController {
     private final IngestionTaskService ingestionTaskService;
     private final DocumentIngestionProcessor documentIngestionProcessor;
     private final ChunkEmbeddingService chunkEmbeddingService;
-    private final KnowledgeDocumentService documentService;
     private final ApplicationEventPublisher eventPublisher;
+    private final CurrentUserProvider currentUserProvider;
 
     // ────────────────── 查询（不变）──────────────────
 
@@ -70,7 +70,13 @@ public class IngestionTaskController {
         }
 
         StepCode resumeFrom = inferFailedStep(taskId);
-        eventPublisher.publishEvent(new IngestionStepEvent(taskId, task.getTenantId(), resumeFrom));
+        eventPublisher.publishEvent(
+                new IngestionTaskStartEvent(
+                        taskId,
+                        currentUserProvider.requireLoginUser(),
+                        resumeFrom
+                )
+        );
         return ApiResult.ok();
     }
 
@@ -95,16 +101,7 @@ public class IngestionTaskController {
 
     // ────────────────── 旧同步端点（废弃，保留兼容）──────────────────
 
-    /**
-     * @deprecated 上传后流水线自动异步执行，无需手动调用。
-     *             使用 POST /upload → 轮询 GET /{taskId}。
-     */
-    @Deprecated
-    @PostMapping("/documents/{documentId}/process")
-    public ApiResult<Void> processDocument(@PathVariable("documentId") Long documentId) {
-        ingestionTaskService.processDocument(documentId);
-        return ApiResult.ok();
-    }
+
 
     /**
      * @deprecated 使用 POST /{taskId}/retry 重试失败任务。

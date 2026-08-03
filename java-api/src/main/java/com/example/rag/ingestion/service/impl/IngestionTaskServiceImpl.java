@@ -4,9 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.example.rag.common.enums.IngestionTaskStatus;
 import com.example.rag.common.error.BaseErrorCode;
 import com.example.rag.common.error.BusinessException;
-import com.example.rag.common.error.ClientException;
 import com.example.rag.common.error.DatabaseException;
-import com.example.rag.common.context.UserContext;
 import com.example.rag.common.id.IdGenerator;
 import com.example.rag.common.security.CurrentUserProvider;
 import com.example.rag.ingestion.dto.IngestionTaskCreateCommand;
@@ -14,7 +12,6 @@ import com.example.rag.ingestion.entity.IngestionTask;
 import com.example.rag.ingestion.entity.IngestionTaskStep;
 import com.example.rag.ingestion.mapper.IngestionTaskMapper;
 import com.example.rag.ingestion.mapper.IngestionTaskStepMapper;
-import com.example.rag.ingestion.pipeline.IngestionStepEvent;
 import com.example.rag.ingestion.pipeline.StepCode;
 import com.example.rag.ingestion.service.IngestionTaskService;
 import org.springframework.context.ApplicationEventPublisher;
@@ -71,13 +68,7 @@ public class IngestionTaskServiceImpl implements IngestionTaskService {
         }
 
     }
-    @Override
-    @Deprecated
-    public void processDocument(Long documentId) {
-        IngestionTask task = getLatestTaskByDocumentId(documentId);
-        eventPublisher.publishEvent(new IngestionStepEvent(task.getId(),
-                task.getTenantId(), StepCode.first()));
-    }
+
 
     @Override
     public IngestionTask getTask(Long taskId) {

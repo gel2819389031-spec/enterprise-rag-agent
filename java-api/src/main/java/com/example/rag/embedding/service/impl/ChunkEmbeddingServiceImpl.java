@@ -9,6 +9,7 @@ import com.example.rag.embedding.config.EmbeddingClientProperties;
 import com.example.rag.embedding.dto.EmbeddingData;
 import com.example.rag.embedding.dto.EmbeddingItem;
 import com.example.rag.embedding.service.ChunkEmbeddingService;
+import com.example.rag.embedding.service.EmbeddingBatchPersistenceService;
 import com.example.rag.ingestion.entity.IngestionTask;
 import com.example.rag.ingestion.service.IngestionTaskService;
 import com.example.rag.knowledge.entity.KnowledgeDocumentChunk;
@@ -40,6 +41,8 @@ public class ChunkEmbeddingServiceImpl implements ChunkEmbeddingService {
     private final EmbeddingClient embeddingClient;
 
     private final EmbeddingClientProperties properties;
+    private final EmbeddingBatchPersistenceService
+            embeddingBatchPersistenceService;
     @Override
     @Deprecated
     @Transactional(rollbackFor = Exception.class)
@@ -86,13 +89,33 @@ public class ChunkEmbeddingServiceImpl implements ChunkEmbeddingService {
      * 不含任务状态管理，供流水线 EmbedStep 调用。
      */
     @Override
-    public int embedBatch(List<KnowledgeDocumentChunk> batch) {
+    public int embedBatch(
+            List<KnowledgeDocumentChunk> batch
+    ) {
+        // 提取当前批次文本。
         List<String> texts = batch.stream()
                 .map(KnowledgeDocumentChunk::getContent)
                 .toList();
-        EmbeddingData data = embeddingClient.embed(texts, properties.getModel());
-        validateEmbeddingData(data, batch.size());
-        writeBatchEmbeddings(batch, data);
+
+        // 调用 Python，不开启数据库事务。
+        EmbeddingData data =
+                embeddingClient.embed(
+                        texts,
+                        properties.getModel()
+                );
+
+        // 校验 Python 返回数量、下标和向量维度。
+        validateEmbeddingData(
+                data,
+                batch.size()
+        );
+
+        // 只在写数据库时开启独立短事务。
+        embeddingBatchPersistenceService.saveBatch(
+                batch,
+                data
+        );
+
         return batch.size();
     }
 
@@ -126,29 +149,4 @@ public class ChunkEmbeddingServiceImpl implements ChunkEmbeddingService {
             }
         }
     }
-    private void writeBatchEmbeddings(List<KnowledgeDocumentChunk> batch, EmbeddingData data) {
-        for (EmbeddingItem item : data.getItems()) {
-            // 根据 Python 返回的 index 找到对应 Chunk。
-            KnowledgeDocumentChunk chunk = batch.get(item.getIndex());
-
-            // 转换为 pgvector 字符串。
-            String vector = toPgVector(item.getEmbedding());
-
-            // 写入数据库。
-            chunkMapper.updateEmbedding(chunk.getId(), vector, data.getModel());
-        }
-
-    }
-    private String toPgVector(List<Double> embedding) {
-        List<String> values = new ArrayList<>(embedding.size());
-
-        for (Double value : embedding) {
-            values.add(String.valueOf(value));
-        }
-
-        return "[" + String.join(",", values) + "]";
-    }
-
-
-
 }

@@ -2,7 +2,7 @@ package com.example.rag.knowledge.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
-import com.example.rag.common.context.UserContext;
+import com.example.rag.common.context.LoginUser;
 import com.example.rag.common.error.BaseErrorCode;
 import com.example.rag.common.error.BusinessException;
 import com.example.rag.common.error.ClientException;
@@ -12,9 +12,7 @@ import com.example.rag.common.security.CurrentUserProvider;
 import com.example.rag.common.storage.ObjectStorageService;
 import com.example.rag.common.utils.FileHashUtils;
 import com.example.rag.ingestion.dto.IngestionTaskCreateCommand;
-import com.example.rag.ingestion.pipeline.IngestionStepEvent;
-import com.example.rag.ingestion.pipeline.StepCode;
-import com.example.rag.ingestion.service.IngestionTaskService;
+import com.example.rag.ingestion.service.DocumentIngestionRegistrationService;
 import com.example.rag.knowledge.entity.KnowledgeBase;
 import com.example.rag.knowledge.entity.KnowledgeDocument;
 import com.example.rag.knowledge.entity.KnowledgeDocumentChunk;
@@ -24,7 +22,7 @@ import com.example.rag.knowledge.mapper.KnowledgeDocumentMapper;
 import com.example.rag.knowledge.service.KnowledgeBaseService;
 import com.example.rag.knowledge.service.KnowledgeDocumentService;
 import lombok.RequiredArgsConstructor;
-import org.springframework.context.ApplicationEventPublisher;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -34,30 +32,30 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Objects;
 
 /**
  * 知识库文档服务实现。
  */
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
     private static final String DEFAULT_PARSE_STATUS = DocumentProcessStatus.PENDING.getCode();
 
     private final ObjectStorageService objectStorageService;
     private final KnowledgeDocumentMapper documentMapper;
     private final KnowledgeBaseService knowledgeBaseService;
-    private final IngestionTaskService ingestionTaskService;
     private final IdGenerator idGenerator;
-    private final ApplicationEventPublisher eventPublisher;
     private final CurrentUserProvider currentUserProvider;
     private final KnowledgeDocumentChunkMapper chunkMapper;
+    private final DocumentIngestionRegistrationService registrationService;
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public KnowledgeDocument uploadDocument(Long knowledgeBaseId, MultipartFile file, String metadata) {
         validateUploadFile(file);
         KnowledgeBase knowledgeBase = knowledgeBaseService.ensureUsable(knowledgeBaseId);
+        Long currentUserId = currentUserProvider.requireUserId();
+        LoginUser loginUser = currentUserProvider.requireLoginUser();
         String originalFilename = sanitizeFilename(file.getOriginalFilename());
         String fileType = extractFileType(originalFilename);
 
@@ -69,14 +67,17 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
             throw new ServiceException(BaseErrorCode.SERVICE_ERROR, "读取上传文件失败", e);
         }
         String contentHash = FileHashUtils.sha256Hex(fileBytes);
+        Long documentId = idGenerator.nextId();
 
         // 生成对象存储 objectKey。
-        String objectKey = buildObjectKey(knowledgeBase.getTenantId(), knowledgeBaseId,
+        String objectKey = buildObjectKey(
+                knowledgeBase.getTenantId(), knowledgeBaseId, documentId,
                 contentHash, originalFilename);
         // 上传到 RustFS / S3，使用已读入的字节，不再次读取 MultipartFile。
         String fileUri = uploadBytes(objectKey, fileBytes, file.getContentType());
         // 构造文档元数据实体。
         KnowledgeDocument document = KnowledgeDocument.builder()
+                .id(documentId)
                 .tenantId(knowledgeBase.getTenantId())
                 .knowledgeBaseId(knowledgeBaseId)
                 .fileName(originalFilename)
@@ -86,21 +87,25 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
                 .contentHash(contentHash)
                 .metadata(defaultMetadata(metadata))
                 .parseStatus(DocumentProcessStatus.PENDING.getCode())
+                .createdBy(currentUserId)
                 .build();
-        KnowledgeDocument knowledgeDocument = registerDocument(document);
+
         // 构造文档入库任务创建命令。
         IngestionTaskCreateCommand command = new IngestionTaskCreateCommand();
         command.setTenantId(knowledgeBase.getTenantId());
         command.setKnowledgeBaseId(knowledgeBaseId);
-        command.setDocumentId(knowledgeDocument.getId());
-        command.setCreatedBy(currentUserProvider.requireUserId());
-        var task = ingestionTaskService.createDocumentIngestTask(command);
+        command.setDocumentId(documentId);
+        command.setCreatedBy(currentUserId);
 
-        // 发布流水线起始事件 → @Async 异步执行 PARSE → EMBED → COMPLETE
-        eventPublisher.publishEvent(new IngestionStepEvent(task.getId(),
-                knowledgeBase.getTenantId(), StepCode.first()));
-
-        return knowledgeDocument;
+        try {
+            // 短事务保存文档、任务和步骤，并在提交后启动流水线。
+            registrationService.register(document, command, loginUser);
+        } catch (Exception exception) {
+            // 数据库登记失败时，清理本次上传的独立对象。
+            deleteUploadedObjectSafely(objectKey);
+            throw exception;
+        }
+        return document;
     }
 
     /**
@@ -222,12 +227,18 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
         }
         return filename.substring(index + 1).toLowerCase();
     }
-    private String buildObjectKey(Long tenantId, Long knowledgeBaseId, String contentHash, String filename) {
+    private String buildObjectKey(Long tenantId,
+                                  Long knowledgeBaseId,
+                                  Long documentId,
+                                  String contentHash,
+                                  String filename) {
         return "tenant/"
                 + tenantId
                 + "/knowledge-base/"
                 + knowledgeBaseId
                 + "/document/"
+                + documentId
+                + "/"
                 + contentHash
                 + "/"
                 + filename;
@@ -241,6 +252,18 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
     }
     private String defaultMetadata(String metadata) {
         return metadata == null || metadata.isBlank() ? "{}" : metadata;
+    }
+
+    /**
+     * 数据库登记失败时清理本次已经上传的对象。
+     * 清理失败只记录日志，不能覆盖原始数据库异常。
+     */
+    private void deleteUploadedObjectSafely(String objectKey) {
+        try {
+            objectStorageService.delete(objectKey);
+        } catch (Exception cleanupException) {
+            log.error("清理上传对象失败, objectKey={}", objectKey, cleanupException);
+        }
     }
 
     private String defaultIfBlank(String value, String defaultValue) {

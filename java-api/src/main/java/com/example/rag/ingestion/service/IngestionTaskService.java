@@ -16,7 +16,6 @@ public interface IngestionTaskService {
      */
     IngestionTask createDocumentIngestTask(IngestionTaskCreateCommand command);
 
-    public void  processDocument ( Long documentId);
     /**
      * 根据任务 ID 查询任务主信息。
      */

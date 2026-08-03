@@ -10,6 +10,7 @@ import com.example.rag.ingestion.chunk.TextNormalizer;
 import com.example.rag.ingestion.entity.IngestionTask;
 import com.example.rag.ingestion.parser.DocumentParser;
 import com.example.rag.ingestion.parser.ParsedDocument;
+import com.example.rag.ingestion.persistence.ChunkPersistenceService;
 import com.example.rag.ingestion.service.IngestionTaskService;
 import com.example.rag.knowledge.entity.KnowledgeDocument;
 import com.example.rag.knowledge.enums.DocumentProcessStatus;
@@ -47,13 +48,13 @@ public class DocumentIngestionProcessor {
     private final IngestionTaskService ingestionTaskService;
 
     private final KnowledgeDocumentService documentService;
-    private final KnowledgeDocumentChunkMapper chunkMapper;
     private final ObjectStorageService objectStorageService;
     private final DocumentParser documentParser;
     private final TextNormalizer textNormalizer;
     private final TextChunkerFactory textChunkerFactory;
     private final IdGenerator idGenerator;
     private final ObjectMapper objectMapper;
+    private final ChunkPersistenceService chunkPersistenceService;
 
     /**
      * 执行文档解析、切分和 Chunk 入库（含任务状态管理）。
@@ -115,8 +116,7 @@ public class DocumentIngestionProcessor {
                             KnowledgeDocument document,
                             List<TextChunk> chunks,
                             String chunkerType) {
-        // 物理删除旧 Chunk，避免 unique(document_id, chunk_index) 冲突。
-        chunkMapper.deleteByDocumentIdPhysically(document.getId());
+
 
         Instant now = Instant.now();
 
@@ -137,8 +137,10 @@ public class DocumentIngestionProcessor {
             entity.setDeleted(false);
             entities.add(entity);
         }
-        // 批量插入，避免 N+1 JDBC round-trip
-        chunkMapper.insert(entities);
+        chunkPersistenceService.replaceDocumentChunks(
+                document.getId(),
+                entities
+        );
 
 
     }

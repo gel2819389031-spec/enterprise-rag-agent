@@ -66,7 +66,7 @@ public class EmbedStep extends PipelineStep {
             int start = batchIdx * batchSize;
             int end = Math.min(start + batchSize, chunks.size());
             List<KnowledgeDocumentChunk> batch = chunks.subList(start, end);
-            processOneBatch(batch, batchIdx + 1, totalBatches);
+            embeddingService.embedBatch(batch);
             // EMBED 占进度的 50%（30→80），每批完成后更新
             int progress = 30 + (batchIdx + 1) * 50 / totalBatches;
             taskService.updateProgress(taskId, progress);
@@ -76,13 +76,6 @@ public class EmbedStep extends PipelineStep {
                 taskId, chunks.size(), totalBatches);
     }
 
-    /**
-     * 单个批次——独立事务，委托 {@link ChunkEmbeddingService#embedBatch(List)}。
-     */
-    @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
-    public void processOneBatch(List<KnowledgeDocumentChunk> batch, int batchNum, int totalBatches) {
-        log.debug("向量化批次 {}/{}, size={}", batchNum, totalBatches, batch.size());
-        embeddingService.embedBatch(batch);
-        log.debug("向量化批次 {}/{} 完成", batchNum, totalBatches);
-    }
+
+
 }
