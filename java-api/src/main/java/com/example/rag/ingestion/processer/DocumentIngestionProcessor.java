@@ -16,6 +16,8 @@ import com.example.rag.knowledge.enums.DocumentProcessStatus;
 import com.example.rag.knowledge.entity.KnowledgeDocumentChunk;
 import com.example.rag.knowledge.mapper.KnowledgeDocumentChunkMapper;
 import com.example.rag.knowledge.service.KnowledgeDocumentService;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -24,7 +26,9 @@ import org.springframework.transaction.annotation.Transactional;
 import java.io.InputStream;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 文档入库处理器。
@@ -49,6 +53,7 @@ public class DocumentIngestionProcessor {
     private final TextNormalizer textNormalizer;
     private final TextChunkerFactory textChunkerFactory;
     private final IdGenerator idGenerator;
+    private final ObjectMapper objectMapper;
 
     /**
      * 执行文档解析、切分和 Chunk 入库（含任务状态管理）。
@@ -139,19 +144,17 @@ public class DocumentIngestionProcessor {
     }
 
     private String buildMetadata(String fileName, String chunkerType, TextChunk chunk) {
-        return """
-                {
-                  "sourceFileName": "%s",
-                  "chunkerType": "%s",
-                  "startOffset": %s,
-                  "endOffset": %s
-                }
-                """.formatted(
-                escapeJson(fileName),
-                escapeJson(chunkerType),
-                chunk.getStartOffset(),
-                chunk.getEndOffset()
-        );
+        Map<String,Object> meta=new LinkedHashMap<>();
+        meta.put("sourceFileName", fileName);
+        meta.put("chunkerType", chunkerType);
+        meta.put("startOffset", chunk.getStartOffset());
+        meta.put("endOffset", chunk.getEndOffset());
+        try {
+            return objectMapper.writeValueAsString(meta);
+        } catch (JsonProcessingException e) {
+            return "{}";
+        }
+
     }
     private String safeErrorMessage(Throwable ex) {
         return ex.getMessage() != null ? ex.getMessage() : ex.getClass().getSimpleName();
