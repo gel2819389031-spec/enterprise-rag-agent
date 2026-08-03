@@ -658,7 +658,7 @@ public class ChatServiceImpl implements ChatService {
     private ChatConversation getOrCreateConversation(ChatRequest request, Long tenantId, Long userId) {
         if (request.getConversationId() != null) {
             ChatConversation conversation = conversationMapper.selectById(request.getConversationId());
-            validateTenantConversation(conversation, tenantId);
+            validateTenantConversation(conversation, tenantId,conversation.getUserId());
             return conversation;
         }
 
@@ -733,17 +733,21 @@ public class ChatServiceImpl implements ChatService {
             throw new ClientException(BaseErrorCode.BAD_REQUEST, "会话 ID 不能为空");
         }
         ChatConversation conversation = conversationMapper.selectById(conversationId);
-        validateTenantConversation(conversation, currentTenantIdRequired());
+        validateTenantConversation(conversation, currentTenantIdRequired(), conversation.getUserId());
         return conversation;
     }
 
-    private void validateTenantConversation(ChatConversation conversation, Long tenantId) {
+    private void validateTenantConversation(ChatConversation conversation, Long tenantId,Long userId) {
         if (conversation == null || Boolean.TRUE.equals(conversation.getDeleted())) {
             throw new ClientException(BaseErrorCode.NOT_FOUND, "会话不存在");
         }
         if (!tenantId.equals(conversation.getTenantId())) {
             throw new ClientException(BaseErrorCode.FORBIDDEN, "无权访问该会话");
         }
+        if (!userId.equals(conversation.getUserId())) {       // ← 也检查了 userId
+            throw new ClientException(BaseErrorCode.FORBIDDEN, "无权访问其他用户的会话");
+        }
+
     }
 
     private String buildTitle(String question) {

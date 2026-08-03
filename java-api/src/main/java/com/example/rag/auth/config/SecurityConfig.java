@@ -2,6 +2,7 @@ package com.example.rag.auth.config;
 
 import com.example.rag.common.web.RequestContextFilter;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -36,6 +37,9 @@ public class SecurityConfig {
             requestContextFilter;
     private final AuthenticationEntryPoint authenticationEntryPoint;
     private final AccessDeniedHandler accessDeniedHandler;
+    @Value("${rag.security.cors.allowed-origins}")
+    private List<String> allowedOrigins;
+
     /**
      * 定义接口访问规则和认证方式。
      */
@@ -149,10 +153,7 @@ public class SecurityConfig {
 
         // 必须填写完整 Origin，不能带路径。
         configuration.setAllowedOrigins(
-                List.of(
-                        "http://127.0.0.1:5173",
-                        "http://localhost:5173"
-                )
+                allowedOrigins
         );
 
         // 允许前端使用的 HTTP 方法。

@@ -45,6 +45,7 @@ public class IngestionTaskServiceImpl implements IngestionTaskService {
     private final ApplicationEventPublisher eventPublisher;
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public IngestionTask createDocumentIngestTask(IngestionTaskCreateCommand command) {
 
         try{
