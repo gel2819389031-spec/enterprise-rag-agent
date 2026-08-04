@@ -8,7 +8,11 @@ import type {
   ChatRequest,
   CurrentUser,
   DocumentChunk,
-  IngestionTask,
+  IngestionTaskDetail,
+  IngestionTaskListItem,
+  IngestionTaskQuery,
+  IngestionTaskStatistics,
+  IngestionTaskStatisticsQuery,
   IngestionTaskStep,
   KnowledgeBase,
   KnowledgeDocument,
@@ -53,15 +57,15 @@ export const documentApi = {
   },
 };
 export const taskApi = {
-  get: (id: string) => http.get<never, IngestionTask>(`/api/ingestion/tasks/${id}`),
+  page: (params: IngestionTaskQuery) =>
+    http.get<never, PageResult<IngestionTaskListItem>>('/api/ingestion/tasks', { params }),
+  statistics: (params: IngestionTaskStatisticsQuery = {}) =>
+    http.get<never, IngestionTaskStatistics>('/api/ingestion/tasks/statistics', { params }),
+  get: (id: string) => http.get<never, IngestionTaskDetail>(`/api/ingestion/tasks/${id}`),
   steps: (id: string) => http.get<never, IngestionTaskStep[]>(`/api/ingestion/tasks/${id}/steps`),
   getByDocument: (docId: string) =>
-    http.get<never, IngestionTask>(`/api/ingestion/tasks/by-document/${docId}`),
+    http.get<never, IngestionTaskDetail>(`/api/ingestion/tasks/by-document/${docId}`),
   retry: (id: string) => http.post(`/api/ingestion/tasks/${id}/retry`),
-  /** @deprecated 上传后自动异步执行，无需手动调用 */
-  process: (id: string) => http.post(`/api/ingestion/tasks/${id}/process`),
-  /** @deprecated 使用 retry 重试失败任务 */
-  embed: (id: string) => http.post(`/api/ingestion/tasks/${id}/embedding`),
 };
 export const chatApi = {
   conversations: (p: { keyword?: string; pageNo: number; pageSize: number }) =>

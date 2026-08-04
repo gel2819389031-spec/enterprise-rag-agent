@@ -1,6 +1,7 @@
 package com.example.rag.ingestion.pipeline;
 
 import com.example.rag.ingestion.entity.IngestionTask;
+import com.example.rag.ingestion.metrics.IngestionMetrics;
 import com.example.rag.ingestion.service.IngestionTaskService;
 import com.example.rag.knowledge.enums.DocumentProcessStatus;
 import com.example.rag.knowledge.service.KnowledgeDocumentService;
@@ -18,8 +19,9 @@ import org.springframework.stereotype.Component;
 public class CompleteStep extends PipelineStep {
 
     public CompleteStep(IngestionTaskService taskService,
-                        KnowledgeDocumentService documentService) {
-        super(taskService, documentService);
+                        KnowledgeDocumentService documentService,
+                        IngestionMetrics ingestionMetrics) {
+        super(taskService, documentService,ingestionMetrics);
     }
 
     @Override

@@ -9,6 +9,7 @@ import com.example.rag.ingestion.chunk.TextChunkerFactory;
 import com.example.rag.ingestion.chunk.TextNormalizer;
 import com.example.rag.ingestion.entity.IngestionTask;
 import com.example.rag.ingestion.enums.IngestionStepCode;
+import com.example.rag.ingestion.metrics.IngestionMetrics;
 import com.example.rag.ingestion.parser.DocumentParser;
 import com.example.rag.ingestion.parser.ParsedDocument;
 import com.example.rag.ingestion.persistence.ChunkPersistenceService;
@@ -27,6 +28,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.io.InputStream;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -59,6 +61,7 @@ public class DocumentIngestionProcessor {
     private final ObjectMapper objectMapper;
     private final ChunkPersistenceService chunkPersistenceService;
     private final IngestionTaskStepService taskStepService;
+    private final IngestionMetrics ingestionMetrics;
 
     /**
      * 执行文档解析、切分和 Chunk 入库（含任务状态管理）。
@@ -163,15 +166,25 @@ public class DocumentIngestionProcessor {
             IngestionStepCode stepCode,
             Supplier<T> action
     ) {
-        // 业务开始前将步骤设置为 RUNNING。
-        taskStepService.markRunning(taskId, stepCode);
+        // nanoTime 只用于计算时间差，不受系统时间校准影响。
+        long startedNanos = System.nanoTime();
 
         try {
+            // 业务开始前将步骤设置为 RUNNING。
+            taskStepService.markRunning(taskId, stepCode);
             // 执行当前步骤的真实业务逻辑。
             T result = action.get();
 
             // 业务执行完成后将步骤设置为 SUCCESS。
             taskStepService.markSuccess(taskId, stepCode);
+            Duration duration =
+                    elapsed(startedNanos);
+            // 记录步骤成功指标。
+            ingestionMetrics.recordStepCompleted(
+                    stepCode.getCode(),
+                    "SUCCESS",
+                    duration
+            );
 
             return result;
         } catch (RuntimeException exception) {
@@ -181,6 +194,15 @@ public class DocumentIngestionProcessor {
                         taskId,
                         stepCode,
                         safeErrorMessage(exception)
+                );
+                Duration duration =
+                        elapsed(startedNanos);
+
+                // 记录步骤失败指标。
+                ingestionMetrics.recordStepCompleted(
+                        stepCode.getCode(),
+                        "FAILED",
+                        duration
                 );
             } catch (Exception statusException) {
                 /*
@@ -209,7 +231,17 @@ public class DocumentIngestionProcessor {
             throw new RuntimeException("读取或解析文档失败", ex);
         }
     }
+    /**
+     * 计算从指定 nanoTime 到当前时间的耗时。
+     */
+    private Duration elapsed(long startedNanos) {
+        long elapsedNanos =
+                System.nanoTime() - startedNanos;
 
+        return Duration.ofNanos(
+                Math.max(elapsedNanos, 0L)
+        );
+    }
     private void saveChunks(IngestionTask task,
                             KnowledgeDocument document,
                             List<TextChunk> chunks,

@@ -1,5 +1,6 @@
 package com.example.rag.ingestion.pipeline;
 
+import com.example.rag.ingestion.metrics.IngestionMetrics;
 import com.example.rag.ingestion.pipeline.*;
 import com.example.rag.ingestion.service.IngestionTaskService;
 import lombok.extern.slf4j.Slf4j;
@@ -27,6 +28,7 @@ public class IngestionPipeline {
                 StepCode.COMPLETE,
                 requireBean(stepBeans, CompleteStep.class)
         );
+
     }
 
     /**

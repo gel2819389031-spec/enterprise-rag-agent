@@ -1,0 +1,268 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.example.rag.ingestion.mapper.IngestionTaskMapper">
+
+    <!-- 任务分页列表响应映射。 -->
+    <resultMap id="taskListResultMap" type="com.example.rag.ingestion.dto.IngestionTaskListResponse">
+            <id property="id" column="task_id"/>
+        <result property="tenantId" column="tenant_id"/>
+        <result property="taskType" column="task_type"/>
+        <result property="status" column="task_status"/>
+        <result property="progress" column="task_progress"/>
+
+        <result property="knowledgeBaseId" column="knowledge_base_id"/>
+        <result property="knowledgeBaseName" column="knowledge_base_name"/>
+
+        <result property="documentId" column="document_id"/>
+        <result property="documentName" column="document_name"/>
+
+        <result property="currentStepCode" column="current_step_code"/>
+        <result property="currentStepName" column="current_step_name"/>
+
+        <result property="errorMessage" column="error_message"/>
+        <result property="durationMillis" column="duration_millis"/>
+        <result property="createdBy" column="created_by"/>
+
+        <result property="startedAt" column="started_at"/>
+        <result property="finishedAt" column="finished_at"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+
+    </resultMap>
+    <!--
+       分页查询任务。
+
+       LATERAL 子查询只为当前任务查找一个最需要展示的步骤：
+       RUNNING > FAILED > PENDING > 最后完成的步骤。
+   -->
+    <select id="selectTaskPage"  resultMap="taskListResultMap">
+        SELECT task.id                AS task_id,
+               task.tenant_id         AS tenant_id,
+               task.task_type         AS task_type,
+               task.status            AS task_status,
+               task.progress          AS task_progress,
+               task.knowledge_base_id AS knowledge_base_id,
+               kb.name                AS knowledge_base_name,
+               task.document_id       AS document_id,
+               document.file_name     AS document_name,
+               current_step.step_code AS current_step_code,
+               current_step.step_name AS current_step_name,
+               task.error_message     AS error_message,
+               task.created_by        AS created_by,
+               task.started_at        AS started_at,
+               task.finished_at       AS finished_at,
+               task.created_at        AS created_at,
+               task.updated_at        AS updated_at,
+
+               CASE
+                   WHEN task.started_at IS NULL THEN NULL
+                   ELSE GREATEST(
+                           0,
+                           FLOOR(
+                                   EXTRACT(
+                                           EPOCH FROM (
+                                       COALESCE(
+                                               task.finished_at,
+                                               CURRENT_TIMESTAMP
+                                       ) - task.started_at
+                                       )
+                                   ) * 1000
+                           )::bigint
+                        )
+                   END                AS duration_millis
+        FROM ingestion_task task
+        LEFT JOIN kb_knowledge_base kb
+                  ON kb.id = task.knowledge_base_id
+                      AND kb.tenant_id = task.tenant_id
+                      AND kb.deleted = false
+
+        LEFT JOIN kb_document document
+                  ON document.id = task.document_id
+                      AND document.tenant_id = task.tenant_id
+                      AND document.deleted = false
+        LEFT JOIN LATERAL (
+            SELECT step.step_code,
+                   step.step_name
+            FROM ingestion_task_step step
+            WHERE step.task_id = task.id
+            ORDER BY
+                CASE step.status
+                    WHEN 'RUNNING' THEN 1
+                    WHEN 'FAILED' THEN 2
+                    WHEN 'PENDING' THEN 3
+                    ELSE 4
+                    END,
+                CASE
+                    WHEN step.status = 'PENDING'
+                        THEN step.id
+                    END ASC,
+                step.id DESC
+            LIMIT 1
+            ) current_step ON TRUE
+        <where>
+            <!-- 强制租户隔离。 -->
+            task.tenant_id = #{tenantId}
+
+            <if test="request.status != null and request.status != ''">
+                AND task.status = #{request.status}
+            </if>
+
+            <if test="request.taskType != null and request.taskType != ''">
+                AND task.task_type = #{request.taskType}
+            </if>
+
+            <if test="request.knowledgeBaseId != null">
+                AND task.knowledge_base_id =
+                #{request.knowledgeBaseId}
+            </if>
+
+            <if test="request.documentId != null">
+                AND task.document_id =
+                #{request.documentId}
+            </if>
+
+            <if test="request.createdBy != null">
+                AND task.created_by =
+                #{request.createdBy}
+            </if>
+
+            <if test="request.createdAtStart != null">
+                AND task.created_at
+                &gt;= #{request.createdAtStart}
+            </if>
+
+            <if test="request.createdAtEnd != null">
+                AND task.created_at
+                &lt;= #{request.createdAtEnd}
+            </if>
+
+            <if test="request.keyword != null and request.keyword != ''">
+                AND (
+                <if test="keywordTaskId != null">
+                    task.id = #{keywordTaskId}
+                    OR
+                </if>
+
+                document.file_name ILIKE
+                CONCAT('%', #{request.keyword}, '%')
+
+                OR kb.name ILIKE
+                CONCAT('%', #{request.keyword}, '%')
+                )
+            </if>
+        </where>
+
+        ORDER BY task.created_at DESC,
+        task.id DESC
+    </select>
+    <!-- 任务统计响应映射。 -->
+    <resultMap
+            id="taskStatisticsResultMap"
+            type="com.example.rag.ingestion.dto.IngestionTaskStatisticsResponse">
+
+        <result property="totalCount" column="total_count"/>
+        <result property="pendingCount" column="pending_count"/>
+        <result property="runningCount" column="running_count"/>
+        <result property="successCount" column="success_count"/>
+        <result property="failedCount" column="failed_count"/>
+
+        <result
+                property="averageDurationMillis"
+                column="average_duration_millis"/>
+
+        <result
+                property="todayCreatedCount"
+                column="today_created_count"/>
+
+        <result
+                property="todaySuccessCount"
+                column="today_success_count"/>
+
+        <result
+                property="todayFailedCount"
+                column="today_failed_count"/>
+    </resultMap>
+
+    <select id="selectTaskStatistics"
+            resultMap="taskStatisticsResultMap">
+
+        SELECT COUNT(*) AS total_count,
+
+        COUNT(*) FILTER (
+        WHERE task.status = 'PENDING'
+        ) AS pending_count,
+
+        COUNT(*) FILTER (
+        WHERE task.status = 'RUNNING'
+        ) AS running_count,
+
+        COUNT(*) FILTER (
+        WHERE task.status = 'SUCCESS'
+        ) AS success_count,
+
+        COUNT(*) FILTER (
+        WHERE task.status = 'FAILED'
+        ) AS failed_count,
+
+        COALESCE(
+        AVG(
+        GREATEST(
+        EXTRACT(
+        EPOCH FROM (
+        task.finished_at
+        - task.started_at
+        )
+        ) * 1000,
+        0
+        )
+        ) FILTER (
+        WHERE task.status IN (
+        'SUCCESS',
+        'FAILED'
+        )
+        AND task.started_at IS NOT NULL
+        AND task.finished_at IS NOT NULL
+        ),
+        0
+        )::bigint AS average_duration_millis,
+
+        COUNT(*) FILTER (
+        WHERE task.created_at &gt;= #{todayStart}
+        ) AS today_created_count,
+
+        COUNT(*) FILTER (
+        WHERE task.status = 'SUCCESS'
+        AND task.finished_at &gt;= #{todayStart}
+        ) AS today_success_count,
+
+        COUNT(*) FILTER (
+        WHERE task.status = 'FAILED'
+        AND task.finished_at &gt;= #{todayStart}
+        ) AS today_failed_count
+
+        FROM ingestion_task task
+
+        <where>
+            <!-- 所有统计必须限制当前租户。 -->
+            task.tenant_id = #{tenantId}
+
+            <if test="request.knowledgeBaseId != null">
+                AND task.knowledge_base_id =
+                #{request.knowledgeBaseId}
+            </if>
+
+            <if test="request.createdAtStart != null">
+                AND task.created_at
+                &gt;= #{request.createdAtStart}
+            </if>
+
+            <if test="request.createdAtEnd != null">
+                AND task.created_at
+                &lt;= #{request.createdAtEnd}
+            </if>
+        </where>
+    </select>
+</mapper>

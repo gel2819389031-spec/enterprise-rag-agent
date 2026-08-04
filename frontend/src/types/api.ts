@@ -10,6 +10,8 @@ export interface PageResult<T> {
   total: number;
   pageNo: number;
   pageSize: number;
+  pages: number;
+  hasNext: boolean;
 }
 export interface TokenResponse {
   tokenType: string;
@@ -102,14 +104,73 @@ export interface IngestionTask {
   createdAt: string;
   updatedAt: string;
 }
+
+/** 任务中心分页查询条件，与后端 IngestionTaskQueryRequest 对齐。 */
+export interface IngestionTaskQuery {
+  keyword?: string;
+  status?: IngestionStatus;
+  taskType?: IngestionTaskType;
+  knowledgeBaseId?: string;
+  documentId?: string;
+  createdBy?: string;
+  createdAtStart?: string;
+  createdAtEnd?: string;
+  pageNo: number;
+  pageSize: number;
+}
+
+/** 任务中心列表项，与后端 IngestionTaskListResponse 对齐。 */
+export interface IngestionTaskListItem extends IngestionTask {
+  knowledgeBaseName?: string;
+  documentName?: string;
+  currentStepCode?: string;
+  currentStepName?: string;
+  durationMillis?: number;
+  createdBy?: string;
+}
+
+/** 任务详情，与后端 IngestionTaskDetailResponse 对齐。 */
+export interface IngestionTaskDetail extends IngestionTaskListItem {
+  fileType?: string;
+  fileSize?: number;
+  documentStatus?: DocumentParseStatus;
+  canRetry: boolean;
+  steps: IngestionTaskStep[];
+  knowledgeBaseDeleted?: boolean;
+  documentDeleted?: boolean;
+}
+
+/** 任务统计，与后端 IngestionTaskStatisticsResponse 对齐。 */
+export interface IngestionTaskStatistics {
+  totalCount: number;
+  pendingCount: number;
+  runningCount: number;
+  successCount: number;
+  failedCount: number;
+  successRate: number;
+  averageDurationMillis: number;
+  todayCreatedCount: number;
+  todaySuccessCount: number;
+  todayFailedCount: number;
+}
+
+/** 任务统计查询条件，与后端 IngestionTaskStatisticsQuery 对齐。 */
+export interface IngestionTaskStatisticsQuery {
+  knowledgeBaseId?: string;
+  createdAtStart?: string;
+  createdAtEnd?: string;
+}
+
 export interface IngestionTaskStep {
   id: string;
   taskId: string;
+  stepCode: string;
   stepName: string;
   status: IngestionStatus;
   errorMessage?: string;
   startedAt?: string;
   finishedAt?: string;
+  durationMillis?: number;
 }
 export interface ChatConversation {
   id: string;

@@ -1,6 +1,7 @@
 package com.example.rag.ingestion.service;
 
 import com.example.rag.common.context.LoginUser;
+import com.example.rag.common.context.RequestContext;
 import com.example.rag.common.enums.IngestionTaskStatus;
 import com.example.rag.common.error.BaseErrorCode;
 import com.example.rag.common.error.BusinessException;
@@ -68,7 +69,8 @@ public class IngestionTaskRetryService {
                 new IngestionTaskStartEvent(
                         taskId,
                         loginUser,
-                        resumeFrom
+                        resumeFrom,
+                        RequestContext.requestId()
                 )
         );
     }

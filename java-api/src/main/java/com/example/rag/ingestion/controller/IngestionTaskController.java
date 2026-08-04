@@ -1,15 +1,18 @@
 package com.example.rag.ingestion.controller;
 
 import com.example.rag.common.api.ApiResult;
+import com.example.rag.common.api.PageResult;
 import com.example.rag.common.error.BaseErrorCode;
 import com.example.rag.common.error.BusinessException;
 import com.example.rag.common.security.CurrentUserProvider;
 import com.example.rag.embedding.service.ChunkEmbeddingService;
+import com.example.rag.ingestion.dto.*;
 import com.example.rag.ingestion.entity.IngestionTask;
 import com.example.rag.ingestion.entity.IngestionTaskStep;
 import com.example.rag.ingestion.event.IngestionTaskStartEvent;
 import com.example.rag.ingestion.pipeline.StepCode;
 import com.example.rag.ingestion.processer.DocumentIngestionProcessor;
+import com.example.rag.ingestion.service.IngestionTaskQueryService;
 import com.example.rag.ingestion.service.IngestionTaskRetryService;
 import com.example.rag.ingestion.service.IngestionTaskService;
 import lombok.RequiredArgsConstructor;
@@ -29,28 +32,64 @@ public class IngestionTaskController {
     private final IngestionTaskService ingestionTaskService;
     private final ChunkEmbeddingService chunkEmbeddingService;
     private final IngestionTaskRetryService retryService;
+    private final IngestionTaskQueryService taskQueryService;
+
 
     // ────────────────── 查询（不变）──────────────────
 
-    @GetMapping("/{taskId}")
-    public ApiResult<IngestionTask> getTask(@PathVariable("taskId") Long taskId) {
-        return ApiResult.ok(ingestionTaskService.getTask(taskId));
+    /**
+     * 分页查询当前租户的入库任务。
+     */
+    @GetMapping
+    public ApiResult<PageResult<IngestionTaskListResponse>>
+    pageTasks( IngestionTaskQueryRequest request) {
+        // Spring MVC 自动将 URL 查询参数绑定到 request。
+        return ApiResult.ok(
+                taskQueryService.pageTasks(request)
+        );
     }
-
+    /**
+     * 查询任务详情。
+     */
+    @GetMapping("/{taskId}")
+    public ApiResult<IngestionTaskDetailResponse> getTask(
+            @PathVariable("taskId") Long taskId
+    ) {
+        return ApiResult.ok(
+                taskQueryService.getTaskDetail(taskId)
+        );
+    }
+    /**
+     * 查询任务步骤。
+     */
     @GetMapping("/{taskId}/steps")
-    public ApiResult<List<IngestionTaskStep>> listTaskSteps(@PathVariable("taskId") Long taskId) {
-        return ApiResult.ok(ingestionTaskService.listTaskSteps(taskId));
+    public ApiResult<List<IngestionTaskStepResponse>>
+    listTaskSteps(
+            @PathVariable("taskId") Long taskId
+    ) {
+        return ApiResult.ok(
+                taskQueryService.listTaskSteps(taskId)
+        );
     }
 
     /**
      * 根据文档 ID 查询最新入库任务。
      * 前端上传后通过此接口轮询任务进度。
      */
+    /**
+     * 根据文档 ID 查询最新任务详情。
+     */
     @GetMapping("/by-document/{documentId}")
-    public ApiResult<IngestionTask> getTaskByDocument(@PathVariable("documentId") Long documentId) {
-        return ApiResult.ok(ingestionTaskService.getLatestTaskByDocumentId(documentId));
+    public ApiResult<IngestionTaskDetailResponse>
+    getTaskByDocument(
+            @PathVariable("documentId") Long documentId
+    ) {
+        return ApiResult.ok(
+                taskQueryService.getLatestTaskByDocumentId(
+                        documentId
+                )
+        );
     }
-
     // ────────────────── 重试（新）──────────────────
 
     /**
@@ -88,5 +127,18 @@ public class IngestionTaskController {
     public ApiResult<Void> embedChunks(@PathVariable("taskId") Long taskId) {
         chunkEmbeddingService.embedDocumentChunks(taskId);
         return ApiResult.ok();
+    }
+    /**
+     * 查询当前租户的任务统计数据。
+     */
+    @GetMapping("/statistics")
+    public ApiResult<IngestionTaskStatisticsResponse>
+    statistics(
+            @ModelAttribute
+            IngestionTaskStatisticsQuery request
+    ) {
+        return ApiResult.ok(
+                taskQueryService.statistics(request)
+        );
     }
 }

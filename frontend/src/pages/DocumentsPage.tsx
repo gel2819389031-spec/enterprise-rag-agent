@@ -10,7 +10,7 @@ import {
 import { useParams } from 'react-router-dom';
 import { documentApi, kbApi, taskApi } from '../api/modules';
 import { PageHeader } from '../components/PageHeader';
-import type { DocumentChunk, DocumentParseStatus, IngestionTask, KnowledgeDocument } from '../types/api';
+import type { DocumentChunk, DocumentParseStatus, KnowledgeDocument } from '../types/api';
 
 const PARSE_STATUS_LABEL: Record<DocumentParseStatus, { color: string; text: string }> = {
   PENDING:    { color: 'default',    text: '排队中' },

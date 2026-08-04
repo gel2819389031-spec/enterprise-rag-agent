@@ -1,9 +1,11 @@
 package com.example.rag.ingestion.event;
 
+import com.example.rag.common.context.RequestContext;
 import com.example.rag.common.context.UserContext;
 import com.example.rag.ingestion.pipeline.IngestionPipeline;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.event.TransactionPhase;
@@ -34,7 +36,23 @@ public class IngestionTaskStartListener {
         try {
             // 异步线程没有 HTTP ThreadLocal，需要恢复用户上下文。
             UserContext.set(event.loginUser());
+            // 恢复原始 HTTP 请求链路。
+            RequestContext.setRequestId(
+                    event.requestId()
+            );
+            // 写入任务相关日志上下文。
+            MDC.put(
+                    "taskId",
+                    String.valueOf(event.taskId())
+            );
 
+            if (event.loginUser() != null
+                    && event.loginUser().tenantId() != null) {
+                MDC.put(
+                        "tenantId",
+                        event.loginUser().tenantId()
+                );
+            }
             ingestionPipeline.execute(
                     event.taskId(),
                     event.startStep()
@@ -48,6 +66,9 @@ public class IngestionTaskStartListener {
         } finally {
             // 线程池线程会复用，必须清理 ThreadLocal。
             UserContext.clear();
+            RequestContext.clear();
+            MDC.remove("taskId");
+            MDC.remove("tenantId");
         }
     }
 }

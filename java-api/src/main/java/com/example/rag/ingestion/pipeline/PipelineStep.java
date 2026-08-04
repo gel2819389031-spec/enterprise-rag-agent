@@ -2,12 +2,16 @@ package com.example.rag.ingestion.pipeline;
 
 import com.example.rag.common.enums.IngestionTaskStatus;
 import com.example.rag.ingestion.entity.IngestionTask;
+import com.example.rag.ingestion.metrics.IngestionMetrics;
 import com.example.rag.ingestion.service.IngestionTaskService;
 import com.example.rag.knowledge.enums.DocumentProcessStatus;
 import com.example.rag.knowledge.service.KnowledgeDocumentService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.time.Duration;
+import java.time.Instant;
 
 /**
  * 流水线步骤抽象基类。
@@ -25,11 +29,16 @@ public abstract class PipelineStep {
 
     protected final IngestionTaskService taskService;
     protected final KnowledgeDocumentService documentService;
+    protected final IngestionMetrics ingestionMetrics;
 
-    protected PipelineStep(IngestionTaskService taskService,
-                           KnowledgeDocumentService documentService) {
+    protected PipelineStep(
+            IngestionTaskService taskService,
+            KnowledgeDocumentService documentService,
+            IngestionMetrics ingestionMetrics
+    ) {
         this.taskService = taskService;
         this.documentService = documentService;
+        this.ingestionMetrics = ingestionMetrics;
     }
 
     /** 本步骤编码 */
@@ -51,6 +60,15 @@ public abstract class PipelineStep {
              * 和 EmbedStep 在真实业务边界上更新。
              */
             doExecute(taskId);
+            if (code() == StepCode.COMPLETE) {
+                IngestionTask completedTask =
+                        taskService.getTask(taskId);
+
+                ingestionMetrics.recordTaskCompleted(
+                        "SUCCESS",
+                        calculateTaskDuration(completedTask)
+                );
+            }
 
             log.info(
                     "流水线阶段完成, step={}, taskId={}",
@@ -70,6 +88,27 @@ public abstract class PipelineStep {
                     taskId,
                     safeMessage(exception)
             );
+            try {
+                // 查询已经写入 finishedAt 的失败任务。
+                IngestionTask failedTask =
+                        taskService.getTask(taskId);
+
+                ingestionMetrics.recordTaskCompleted(
+                        "FAILED",
+                        calculateTaskDuration(failedTask)
+                );
+            } catch (Exception metricsException) {
+                /*
+                 * 指标记录失败不能覆盖真正的业务异常。
+                 */
+                exception.addSuppressed(metricsException);
+
+                log.warn(
+                        "记录入库任务失败指标异常, taskId={}",
+                        taskId,
+                        metricsException
+                );
+            }
 
             try {
                 // 将文档状态同步更新为失败。
@@ -102,6 +141,31 @@ public abstract class PipelineStep {
      */
     protected abstract void doExecute(Long taskId) throws Exception;
 
+    /**
+     * 计算任务从开始到结束的执行时间。
+     */
+    private Duration calculateTaskDuration(
+            IngestionTask task
+    ) {
+        if (task.getStartedAt() == null) {
+            return Duration.ZERO;
+        }
+
+        Instant finishedAt =
+                task.getFinishedAt() == null
+                        ? Instant.now()
+                        : task.getFinishedAt();
+
+        Duration duration =
+                Duration.between(
+                        task.getStartedAt(),
+                        finishedAt
+                );
+
+        return duration.isNegative()
+                ? Duration.ZERO
+                : duration;
+    }
     /**
      * 查询并校验任务存在。
      */

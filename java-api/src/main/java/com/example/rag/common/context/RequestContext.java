@@ -1,5 +1,7 @@
 package com.example.rag.common.context;
 
+import org.slf4j.MDC;
+
 /**
  * 请求级上下文。
  *
@@ -16,7 +18,12 @@ public final class RequestContext {
      * 写入当前请求的 requestId。
      */
     public static void setRequestId(String requestId) {
+
         REQUEST_ID.set(requestId);
+        // 同时写入日志 MDC，让日志格式可以自动输出 requestId。
+        if (requestId != null && !requestId.isBlank()) {
+            MDC.put("requestId", requestId);
+        }
     }
 
     /**
@@ -31,5 +38,6 @@ public final class RequestContext {
      */
     public static void clear() {
         REQUEST_ID.remove();
+        MDC.remove("requestId");
     }
 }

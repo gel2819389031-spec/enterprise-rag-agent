@@ -1,9 +1,11 @@
 package com.example.rag.ingestion.service;
 
 import com.example.rag.common.context.LoginUser;
+import com.example.rag.common.context.RequestContext;
 import com.example.rag.ingestion.dto.IngestionTaskCreateCommand;
 import com.example.rag.ingestion.entity.IngestionTask;
 import com.example.rag.ingestion.event.IngestionTaskStartEvent;
+import com.example.rag.ingestion.metrics.IngestionMetrics;
 import com.example.rag.ingestion.pipeline.StepCode;
 import com.example.rag.knowledge.entity.KnowledgeDocument;
 import com.example.rag.knowledge.mapper.KnowledgeDocumentMapper;
@@ -11,6 +13,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /**
  * 文档和入库任务事务注册服务。
@@ -27,6 +31,7 @@ public class DocumentIngestionRegistrationService {
     private final IngestionTaskService ingestionTaskService;
 
     private final ApplicationEventPublisher eventPublisher;
+    private final IngestionMetrics ingestionMetrics;
 
     /**
      * 原子保存文档和入库任务，并发布流水线启动事件。
@@ -44,15 +49,44 @@ public class DocumentIngestionRegistrationService {
         command.setDocumentId(document.getId());
         IngestionTask task =
                 ingestionTaskService.createDocumentIngestTask(command);
-
+        // 事务真正提交后再统计任务创建数量。
+        recordTaskCreatedAfterCommit(task);
         // 监听器会在当前事务提交成功后异步启动流水线。
         eventPublisher.publishEvent(
                 new IngestionTaskStartEvent(
                         task.getId(),
                         loginUser,
-                        StepCode.first()
+                        StepCode.first(),
+                        RequestContext.requestId()
                 )
         );
         return task;
+    }
+    /**
+     * 在数据库事务提交成功后记录任务创建指标。
+     */
+    private void recordTaskCreatedAfterCommit(
+            IngestionTask task
+    ) {
+        if (TransactionSynchronizationManager
+                .isSynchronizationActive()) {
+            TransactionSynchronizationManager
+                    .registerSynchronization(
+                            new TransactionSynchronization() {
+                                @Override
+                                public void afterCommit() {
+                                    ingestionMetrics.recordTaskCreated(
+                                            task.getTaskType()
+                                    );
+                                }
+                            }
+                    );
+            return;
+        }
+
+        // 没有事务时直接记录，作为防御性处理。
+        ingestionMetrics.recordTaskCreated(
+                task.getTaskType()
+        );
     }
 }

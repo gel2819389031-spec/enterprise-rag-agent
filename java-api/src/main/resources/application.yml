@@ -69,6 +69,7 @@ rag:
 
 
 mybatis-plus:
+  mapper-locations: classpath*:/mapper/**/*.xml
   global-config:
     db-config:
       # MyBatis-Plus 逻辑删除字段。delete/deleteById 会更新该字段，而不是物理删除。
@@ -77,3 +78,14 @@ mybatis-plus:
       logic-delete-value: true
       # PostgreSQL boolean 类型用 false 表示未删除，等价于业务语义里的 0。
       logic-not-delete-value: false
+logging:
+  pattern:
+    console: >-
+      %d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX}
+      %-5level
+      [%thread]
+      %logger{36}
+      requestId=%X{requestId:-}
+      taskId=%X{taskId:-}
+      tenantId=%X{tenantId:-}
+      - %msg%n

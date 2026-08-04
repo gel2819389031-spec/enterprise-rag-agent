@@ -13,6 +13,7 @@ import com.example.rag.ingestion.pipeline.StepCode;
 public record IngestionTaskStartEvent(
         Long taskId,
         LoginUser loginUser,
-        StepCode startStep
+        StepCode startStep,
+        String requestId
 ) {
 }

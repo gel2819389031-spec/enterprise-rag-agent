@@ -4,6 +4,7 @@ import com.example.rag.embedding.config.EmbeddingClientProperties;
 import com.example.rag.embedding.service.ChunkEmbeddingService;
 import com.example.rag.ingestion.entity.IngestionTask;
 import com.example.rag.ingestion.enums.IngestionStepCode;
+import com.example.rag.ingestion.metrics.IngestionMetrics;
 import com.example.rag.ingestion.service.IngestionTaskService;
 import com.example.rag.ingestion.service.IngestionTaskStepService;
 import com.example.rag.knowledge.entity.KnowledgeDocumentChunk;
@@ -15,6 +16,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.util.List;
 
 /**
@@ -34,11 +36,12 @@ public class EmbedStep extends PipelineStep {
 
     public EmbedStep(IngestionTaskService taskService,
                      KnowledgeDocumentService documentService,
+                     IngestionMetrics ingestionMetrics,
                      KnowledgeDocumentChunkMapper chunkMapper,
                      ChunkEmbeddingService embeddingService,
                      EmbeddingClientProperties properties,
                      IngestionTaskStepService taskStepService) {
-        super(taskService, documentService);
+        super(taskService, documentService,ingestionMetrics);
         this.chunkMapper = chunkMapper;
         this.embeddingService = embeddingService;
         this.properties = properties;
@@ -78,6 +81,7 @@ public class EmbedStep extends PipelineStep {
             Long taskId,
             IngestionTask task
     ) {
+        long stepStartedNanos = System.nanoTime();
         // 将向量生成步骤设置为运行中。
         taskStepService.markRunning(
                 taskId,
@@ -96,6 +100,11 @@ public class EmbedStep extends PipelineStep {
                         "没有待向量化 Chunk, taskId={}, documentId={}",
                         taskId,
                         task.getDocumentId()
+                );
+                ingestionMetrics.recordStepCompleted(
+                        IngestionStepCode.EMBEDDING.getCode(),
+                        "SUCCESS",
+                        elapsed(stepStartedNanos)
                 );
 
                 // 没有待处理数据，说明向量已经全部生成。
@@ -133,7 +142,27 @@ public class EmbedStep extends PipelineStep {
                         chunks.subList(start, end);
 
                 // 调用 Python Embedding，并在独立事务中保存向量。
-                embeddingService.embedBatch(batch);
+                long batchStartedNanos =
+                        System.nanoTime();
+
+                try {
+                    // 调用 Python Embedding 并保存当前批次向量。
+                    embeddingService.embedBatch(batch);
+
+                    ingestionMetrics.recordEmbeddingBatch(
+                            "SUCCESS",
+                            batch.size(),
+                            elapsed(batchStartedNanos)
+                    );
+                } catch (RuntimeException exception) {
+                    ingestionMetrics.recordEmbeddingBatch(
+                            "FAILED",
+                            batch.size(),
+                            elapsed(batchStartedNanos)
+                    );
+
+                    throw exception;
+                }
 
                 // 向量化阶段占总任务进度的 30% 到 80%。
                 int progress =
@@ -154,6 +183,14 @@ public class EmbedStep extends PipelineStep {
                     IngestionStepCode.EMBEDDING
             );
 
+            Duration duration =
+                    elapsed(stepStartedNanos);
+
+            ingestionMetrics.recordStepCompleted(
+                    IngestionStepCode.EMBEDDING.getCode(),
+                    "SUCCESS",
+                    duration
+            );
             log.info(
                     "向量化完成, taskId={}, chunks={}, batches={}",
                     taskId,
@@ -167,6 +204,11 @@ public class EmbedStep extends PipelineStep {
                     IngestionStepCode.EMBEDDING,
                     exception
             );
+            ingestionMetrics.recordStepCompleted(
+                    IngestionStepCode.EMBEDDING.getCode(),
+                    "FAILED",
+                    elapsed(stepStartedNanos)
+            );
 
             throw exception;
         }
@@ -176,6 +218,7 @@ public class EmbedStep extends PipelineStep {
      * 确认 pgvector 索引维护完成。
      */
     private void executeVectorIndexStep(Long taskId) {
+        long startedNanos = System.nanoTime();
         // 标记向量索引步骤开始。
         taskStepService.markRunning(
                 taskId,
@@ -194,12 +237,22 @@ public class EmbedStep extends PipelineStep {
                     taskId,
                     IngestionStepCode.INDEX_VECTOR
             );
+            ingestionMetrics.recordStepCompleted(
+                    IngestionStepCode.INDEX_VECTOR.getCode(),
+                    "SUCCESS",
+                    elapsed(startedNanos)
+            );
         } catch (RuntimeException exception) {
             // 单独记录索引步骤失败。
             markStepFailedSafely(
                     taskId,
                     IngestionStepCode.INDEX_VECTOR,
                     exception
+            );
+            ingestionMetrics.recordStepCompleted(
+                    IngestionStepCode.INDEX_VECTOR.getCode(),
+                    "FAILED",
+                    elapsed(startedNanos)
             );
 
             throw exception;
@@ -238,5 +291,13 @@ public class EmbedStep extends PipelineStep {
         }
     }
 
+    private Duration elapsed(long startedNanos) {
+        long elapsedNanos =
+                System.nanoTime() - startedNanos;
+
+        return Duration.ofNanos(
+                Math.max(elapsedNanos, 0L)
+        );
+    }
 
 }
