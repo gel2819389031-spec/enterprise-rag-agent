@@ -239,6 +239,106 @@ textarea {
   color: #5661db;
   margin-bottom: 16px;
 }
+.retrieval-form-card .ant-card-body {
+  padding: 22px 24px;
+}
+.retrieval-switches {
+  display: flex;
+  gap: 36px;
+}
+.retrieval-switches .ant-form-item {
+  margin-bottom: 8px;
+}
+.retrieval-advanced {
+  margin: 2px -16px 14px;
+}
+.retrieval-advanced .ant-input-number {
+  width: 100%;
+}
+.retrieval-empty {
+  min-height: 300px;
+  display: grid;
+  place-items: center;
+  color: #8b95a9;
+}
+.retrieval-empty .ant-empty-image {
+  height: auto;
+  font-size: 44px;
+  color: #7c86e8;
+}
+.retrieval-query-summary {
+  display: grid;
+  grid-template-columns: minmax(320px, 1.4fr) minmax(260px, 1fr) auto;
+  gap: 24px;
+  align-items: center;
+  padding: 18px 20px;
+  background: #fff;
+  border: 1px solid #e4e8f0;
+}
+.retrieval-query-summary .ant-typography {
+  margin-bottom: 0;
+}
+.retrieval-keywords {
+  margin-top: 5px;
+}
+.retrieval-timing-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(110px, 1fr));
+  margin-top: 16px;
+  background: #fff;
+  border: 1px solid #e4e8f0;
+}
+.retrieval-timing-grid > div {
+  min-width: 0;
+  padding: 14px 16px;
+  border-right: 1px solid #edf0f5;
+}
+.retrieval-timing-grid > div:last-child {
+  border-right: 0;
+}
+.retrieval-timing-grid .is-total {
+  background: #f1f3ff;
+}
+.retrieval-timing-grid .ant-statistic-title {
+  white-space: nowrap;
+}
+.retrieval-timing-grid .ant-statistic-content {
+  font-size: 18px;
+}
+.retrieval-score-list {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px 10px;
+  color: #59647a;
+  font-size: 12px;
+}
+.retrieval-expanded-row {
+  padding: 8px 12px 14px;
+}
+.retrieval-content {
+  max-height: 260px;
+  overflow: auto;
+  white-space: pre-wrap;
+  line-height: 1.75;
+}
+.retrieval-metadata {
+  max-height: 160px;
+  margin: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  color: #59647a;
+}
+.retrieval-context-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.retrieval-context textarea {
+  font-family: Consolas, 'Courier New', monospace;
+  line-height: 1.65;
+  background: #f8f9fc;
+}
 @media (max-width: 1366px) {
   .content {
     padding: 20px;
@@ -249,5 +349,11 @@ textarea {
   .composer {
     margin-left: 5vw;
     margin-right: 5vw;
+  }
+  .retrieval-timing-grid {
+    grid-template-columns: repeat(4, minmax(120px, 1fr));
+  }
+  .retrieval-timing-grid > div:nth-child(4) {
+    border-right: 0;
   }
 }
