@@ -44,15 +44,16 @@ public interface IngestionTaskService {
      * 更新任务进度百分比（0-100）。
      */
     void updateProgress(Long taskId, int progress);
-    /**
-     * 更新指定步骤的状态。
-     * @param taskId   任务 ID
-     * @param stepName 步骤名称（如 "文档解析"、"向量生成"）
-     * @param status   新状态（RUNNING / SUCCESS / FAILED）
-     */
-    void updateStepStatus(Long taskId, String stepName, String status);
+
     /**
      * 查询文档最新的入库任务。
      */
     IngestionTask getLatestTaskByDocumentId(Long documentId);
+    /**
+     * 将失败任务恢复为等待执行状态。
+     *
+     * @param taskId 任务 ID
+     * @param progress 恢复后的初始进度
+     */
+    void prepareRetry(Long taskId, int progress);
 }

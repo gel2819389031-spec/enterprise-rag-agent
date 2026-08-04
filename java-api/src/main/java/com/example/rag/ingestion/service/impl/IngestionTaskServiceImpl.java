@@ -1,6 +1,7 @@
 package com.example.rag.ingestion.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.example.rag.common.enums.IngestionTaskStatus;
 import com.example.rag.common.error.BaseErrorCode;
 import com.example.rag.common.error.BusinessException;
@@ -10,11 +11,11 @@ import com.example.rag.common.security.CurrentUserProvider;
 import com.example.rag.ingestion.dto.IngestionTaskCreateCommand;
 import com.example.rag.ingestion.entity.IngestionTask;
 import com.example.rag.ingestion.entity.IngestionTaskStep;
+import com.example.rag.ingestion.enums.IngestionStepCode;
+import com.example.rag.ingestion.enums.IngestionStepStatus;
 import com.example.rag.ingestion.mapper.IngestionTaskMapper;
 import com.example.rag.ingestion.mapper.IngestionTaskStepMapper;
-import com.example.rag.ingestion.pipeline.StepCode;
 import com.example.rag.ingestion.service.IngestionTaskService;
-import org.springframework.context.ApplicationEventPublisher;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataAccessException;
@@ -40,8 +41,8 @@ public class IngestionTaskServiceImpl implements IngestionTaskService {
     private final IngestionTaskMapper taskMapper;
     private final IngestionTaskStepMapper stepMapper;
     private final IdGenerator idGenerator;
-    private final ApplicationEventPublisher eventPublisher;
     private final CurrentUserProvider currentUserProvider;
+
     @Override
     @Transactional(rollbackFor = Exception.class)
     public IngestionTask createDocumentIngestTask(IngestionTaskCreateCommand command) {
@@ -93,9 +94,54 @@ public class IngestionTaskServiceImpl implements IngestionTaskService {
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public void markTaskRunning(Long taskId) {
-        // 更新任务状态为处理中。
-        updateTaskStatus(taskId, IngestionTaskStatus.RUNNING.getCode(), null);
+        // 校验任务存在并属于当前租户。
+        IngestionTask task = getTask(taskId);
+
+        /*
+         * 只有 PENDING 才能转换为 RUNNING。
+         * 当两个重复事件同时到达时，只允许一个事件取得执行权。
+         */
+        int affectedRows = taskMapper.update(
+                null,
+                Wrappers.<IngestionTask>lambdaUpdate()
+                        .eq(
+                                IngestionTask::getId,
+                                taskId
+                        )
+                        .eq(
+                                IngestionTask::getTenantId,
+                                task.getTenantId()
+                        )
+                        .eq(
+                                IngestionTask::getStatus,
+                                IngestionTaskStatus.PENDING.getCode()
+                        )
+                        .set(
+                                IngestionTask::getStatus,
+                                IngestionTaskStatus.RUNNING.getCode()
+                        )
+                        .set(
+                                IngestionTask::getStartedAt,
+                                Instant.now()
+                        )
+                        .set(
+                                IngestionTask::getFinishedAt,
+                                null
+                        )
+                        .set(
+                                IngestionTask::getErrorMessage,
+                                null
+                        )
+        );
+
+        if (affectedRows != 1) {
+            throw new BusinessException(
+                    BaseErrorCode.CLIENT_ERROR,
+                    "任务已开始执行或状态不允许处理"
+            );
+        }
     }
 
     @Override
@@ -119,24 +165,7 @@ public class IngestionTaskServiceImpl implements IngestionTaskService {
         taskMapper.updateById(task);
     }
 
-    @Override
-    public void updateStepStatus(Long taskId, String stepName, String status) {
-        IngestionTaskStep step = stepMapper.selectOne(
-                new LambdaQueryWrapper<IngestionTaskStep>()
-                        .eq(IngestionTaskStep::getTaskId, taskId)
-                        .eq(IngestionTaskStep::getStepName, stepName));
-        if (step == null) return;
-        Instant now = Instant.now();
-        step.setStatus(status);
-        if (IngestionTaskStatus.RUNNING.getCode().equals(status)) {
-            step.setStartedAt(now);
-        }
-        if (IngestionTaskStatus.SUCCESS.getCode().equals(status)
-                || IngestionTaskStatus.FAILED.getCode().equals(status)) {
-            step.setFinishedAt(now);
-        }
-        stepMapper.updateById(step);
-    }
+
 
     @Override
     public IngestionTask getLatestTaskByDocumentId(Long documentId) {
@@ -153,29 +182,131 @@ public class IngestionTaskServiceImpl implements IngestionTaskService {
         }
         return task;
     }
-    private void initTaskSteps(Long taskId) {
-        // 上传步骤已经在 Step 09 完成，所以初始化为成功。
-        insertStep(taskId, "UPLOAD_DOCUMENT", "文档上传", IngestionTaskStatus.PENDING.getCode());
+    @Override
+    public void prepareRetry(
+            Long taskId,
+            int progress
+    ) {
+        // 查询任务，同时执行当前租户数据权限校验。
+        IngestionTask task = getTask(taskId);
 
-        // 后续步骤暂时只入库，真实执行在 Step 11 之后补充。
-        insertStep(taskId, "PARSE_DOCUMENT", "文档解析", IngestionTaskStatus.PENDING.getCode());
-        insertStep(taskId, "SPLIT_CHUNK", "文本切分", IngestionTaskStatus.PENDING.getCode());
-        insertStep(taskId, "SAVE_CHUNK", "Chunk 入库", IngestionTaskStatus.PENDING.getCode());
-        insertStep(taskId, "EMBEDDING", "向量生成", IngestionTaskStatus.PENDING.getCode());
-        insertStep(taskId, "INDEX_VECTOR", "向量索引", IngestionTaskStatus.PENDING.getCode());
+        /*
+         * 使用 FAILED 作为更新条件，实现乐观状态控制。
+         * 第一次请求成功后状态变成 PENDING，
+         * 后续重复请求将无法再次更新。
+         */
+        int affectedRows = taskMapper.update(
+                null,
+                Wrappers.<IngestionTask>lambdaUpdate()
+                        .eq(
+                                IngestionTask::getId,
+                                taskId
+                        )
+                        .eq(
+                                IngestionTask::getTenantId,
+                                task.getTenantId()
+                        )
+                        .eq(
+                                IngestionTask::getStatus,
+                                IngestionTaskStatus.FAILED.getCode()
+                        )
+                        .set(
+                                IngestionTask::getStatus,
+                                IngestionTaskStatus.PENDING.getCode()
+                        )
+                        .set(
+                                IngestionTask::getProgress,
+                                progress
+                        )
+                        .set(
+                                IngestionTask::getErrorMessage,
+                                null
+                        )
+                        .set(
+                                IngestionTask::getStartedAt,
+                                null
+                        )
+                        .set(
+                                IngestionTask::getFinishedAt,
+                                null
+                        )
+        );
+
+        if (affectedRows != 1) {
+            throw new BusinessException(
+                    BaseErrorCode.CLIENT_ERROR,
+                    "任务状态已发生变化，请刷新后重试"
+            );
+        }
+    }
+    private void initTaskSteps(Long taskId) {
+        Instant uploadedAt = Instant.now();
+
+        /*
+         * 创建入库任务前，对象已经上传到 RustFS，
+         * 因此 UPLOAD_DOCUMENT 应直接初始化为 SUCCESS。
+         */
+        insertStep(
+                taskId,
+                IngestionStepCode.UPLOAD_DOCUMENT,
+                IngestionStepStatus.SUCCESS,
+                uploadedAt,
+                uploadedAt
+        );
+
+        // 后续步骤等待流水线执行。
+        insertPendingStep(taskId, IngestionStepCode.PARSE_DOCUMENT);
+        insertPendingStep(taskId, IngestionStepCode.SPLIT_CHUNK);
+        insertPendingStep(taskId, IngestionStepCode.SAVE_CHUNK);
+        insertPendingStep(taskId, IngestionStepCode.EMBEDDING);
+        insertPendingStep(taskId, IngestionStepCode.INDEX_VECTOR);
+    }
+    /**
+     * 创建一个等待执行的任务步骤。
+     */
+    private void insertPendingStep(
+            Long taskId,
+            IngestionStepCode stepCode
+    ) {
+        insertStep(
+                taskId,
+                stepCode,
+                IngestionStepStatus.PENDING,
+                null,
+                null
+        );
     }
 
-    private void insertStep(Long taskId, String stepCode, String stepName, String status) {
-        Instant now = Instant.now();
+    /**
+     * 保存任务步骤。
+     */
+    private void insertStep(
+            Long taskId,
+            IngestionStepCode stepCode,
+            IngestionStepStatus status,
+            Instant startedAt,
+            Instant finishedAt
+    ) {
         IngestionTaskStep step = new IngestionTaskStep();
-        step.setId(idGenerator.nextId());
-        step.setTaskId(taskId);
-        step.setStepName(stepName);
-        step.setStatus(status);
-        if (IngestionTaskStatus.SUCCESS.getCode().equals(status)) {
-            step.setFinishedAt(now);
-        }
 
+        // 生成步骤主键。
+        step.setId(idGenerator.nextId());
+
+        // 绑定所属入库任务。
+        step.setTaskId(taskId);
+
+        // stepCode 用于程序查询，不能再依赖中文名称。
+        step.setStepCode(stepCode.getCode());
+
+        // stepName 只用于前端展示。
+        step.setStepName(stepCode.getStepName());
+
+        // 设置步骤初始状态和执行时间。
+        step.setStatus(status.getCode());
+        step.setStartedAt(startedAt);
+        step.setFinishedAt(finishedAt);
+
+        // 保存步骤记录。
         stepMapper.insert(step);
     }
 

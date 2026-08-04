@@ -10,6 +10,7 @@ import com.example.rag.ingestion.entity.IngestionTaskStep;
 import com.example.rag.ingestion.event.IngestionTaskStartEvent;
 import com.example.rag.ingestion.pipeline.StepCode;
 import com.example.rag.ingestion.processer.DocumentIngestionProcessor;
+import com.example.rag.ingestion.service.IngestionTaskRetryService;
 import com.example.rag.ingestion.service.IngestionTaskService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.ApplicationEventPublisher;
@@ -26,10 +27,8 @@ import java.util.List;
 public class IngestionTaskController {
 
     private final IngestionTaskService ingestionTaskService;
-    private final DocumentIngestionProcessor documentIngestionProcessor;
     private final ChunkEmbeddingService chunkEmbeddingService;
-    private final ApplicationEventPublisher eventPublisher;
-    private final CurrentUserProvider currentUserProvider;
+    private final IngestionTaskRetryService retryService;
 
     // ────────────────── 查询（不变）──────────────────
 
@@ -62,41 +61,9 @@ public class IngestionTaskController {
      */
     @PostMapping("/{taskId}/retry")
     public ApiResult<Void> retryTask(@PathVariable("taskId") Long taskId) {
-        IngestionTask task = ingestionTaskService.getTask(taskId);
-        String status = task.getStatus();
-        if (!"FAILED".equals(status)) {
-            throw new BusinessException(BaseErrorCode.CLIENT_ERROR,
-                    "只有失败状态的任务可以重试，当前状态=" + status);
-        }
-
-        StepCode resumeFrom = inferFailedStep(taskId);
-        eventPublisher.publishEvent(
-                new IngestionTaskStartEvent(
-                        taskId,
-                        currentUserProvider.requireLoginUser(),
-                        resumeFrom
-                )
-        );
+        // Controller 只接收参数，业务逻辑交给重试服务。
+        retryService.retry(taskId);
         return ApiResult.ok();
-    }
-
-    /**
-     * 从任务步骤中推断失败步骤。
-     * 返回第一个状态为 FAILED 的步骤对应的 StepCode；找不到时从 PARSE 开始。
-     */
-    private StepCode inferFailedStep(Long taskId) {
-        List<IngestionTaskStep> steps = ingestionTaskService.listTaskSteps(taskId);
-        for (IngestionTaskStep step : steps) {
-            if ("FAILED".equals(step.getStatus())) {
-                String name = step.getStepName();
-                if (name.contains("解析")) return StepCode.PARSE;
-                if (name.contains("切分") || name.contains("Chunk")) return StepCode.PARSE;
-                if (name.contains("向量")) return StepCode.EMBED;
-                return StepCode.PARSE; // 兜底
-            }
-        }
-        // 所有步骤都不是 FAILED → 从头开始
-        return StepCode.first();
     }
 
     // ────────────────── 旧同步端点（废弃，保留兼容）──────────────────
@@ -106,12 +73,12 @@ public class IngestionTaskController {
     /**
      * @deprecated 使用 POST /{taskId}/retry 重试失败任务。
      */
-    @Deprecated
-    @PostMapping("/{taskId}/process")
-    public ApiResult<Void> processTask(@PathVariable("taskId") Long taskId) {
-        documentIngestionProcessor.process(taskId);
-        return ApiResult.ok();
-    }
+//    @Deprecated
+//    @PostMapping("/{taskId}/process")
+//    public ApiResult<Void> processTask(@PathVariable("taskId") Long taskId) {
+//        documentIngestionProcessor.process(taskId);
+//        return ApiResult.ok();
+//    }
 
     /**
      * @deprecated 使用 POST /{taskId}/retry 重试失败任务。

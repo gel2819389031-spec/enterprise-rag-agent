@@ -24,6 +24,7 @@ public class IngestionTaskStep {
      * 任务 ID。
      */
     private Long taskId;
+    private String stepCode;
 
     /**
      * 步骤名称。

@@ -36,31 +36,67 @@ public abstract class PipelineStep {
     public abstract StepCode code();
 
     /**
-     * 执行本步骤。
+     * 执行当前流水线阶段。
      */
     public void execute(Long taskId) {
-        log.info("步骤开始, step={}, taskId={}", code(), taskId);
+        log.info(
+                "流水线阶段开始, step={}, taskId={}",
+                code(),
+                taskId
+        );
+
         try {
-            taskService.markTaskRunning(taskId);
-            updateStepStatus(taskId, IngestionTaskStatus.RUNNING);
+            /*
+             * 具体任务步骤状态由 DocumentIngestionProcessor
+             * 和 EmbedStep 在真实业务边界上更新。
+             */
             doExecute(taskId);
-            updateStepStatus(taskId, IngestionTaskStatus.SUCCESS);
-            log.info("步骤完成, step={}, taskId={}", code(), taskId);
-        } catch (Exception ex) {
-            log.error("步骤失败, step={}, taskId={}", code(), taskId, ex);
-            updateStepStatus(taskId, IngestionTaskStatus.FAILED);
-            taskService.markTaskFailed(taskId, safeMessage(ex));
+
+            log.info(
+                    "流水线阶段完成, step={}, taskId={}",
+                    code(),
+                    taskId
+            );
+        } catch (Exception exception) {
+            log.error(
+                    "流水线阶段失败, step={}, taskId={}",
+                    code(),
+                    taskId,
+                    exception
+            );
+
+            // 标记整个入库任务失败。
+            taskService.markTaskFailed(
+                    taskId,
+                    safeMessage(exception)
+            );
+
             try {
-                IngestionTask task = taskService.getTask(taskId);
-                documentService.markParseStatus(task.getDocumentId(),
-                        DocumentProcessStatus.FAILED.getCode());
-            } catch (Exception ignored) {
-                log.warn("更新文档失败状态时异常, taskId={}", taskId, ignored);
+                // 将文档状态同步更新为失败。
+                IngestionTask task =
+                        taskService.getTask(taskId);
+
+                documentService.markParseStatus(
+                        task.getDocumentId(),
+                        DocumentProcessStatus.FAILED.getCode()
+                );
+            } catch (Exception statusException) {
+                exception.addSuppressed(statusException);
+
+                log.warn(
+                        "更新文档失败状态异常, taskId={}",
+                        taskId,
+                        statusException
+                );
             }
-            throw new StepFailedException(code(), taskId, ex);
+
+            throw new StepFailedException(
+                    code(),
+                    taskId,
+                    exception
+            );
         }
     }
-
     /**
      * 子类实现具体业务逻辑。
      */
@@ -81,19 +117,6 @@ public abstract class PipelineStep {
      * StepCode → ingestion_task_step.stepName 的映射。
      * COMPLETE 不映射（它没有独立的 step 记录）。
      */
-    private String stepName() {
-        return switch (code()) {
-            case PARSE -> "文档解析";
-            case EMBED -> "向量生成";
-            case COMPLETE -> null;
-        };
-    }
-
-    private void updateStepStatus(Long taskId, IngestionTaskStatus status) {
-        String name = stepName();
-        if (name == null) return; // COMPLETE 跳过
-        taskService.updateStepStatus(taskId, name, status.getCode());
-    }
 
     /**
      * 步骤执行失败异常。全局异常处理器返回 500。

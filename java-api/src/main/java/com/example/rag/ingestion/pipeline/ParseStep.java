@@ -39,9 +39,13 @@ public class ParseStep extends PipelineStep {
         IngestionTask task = requireTask(taskId);
         documentService.markParseStatus(task.getDocumentId(),
                 DocumentProcessStatus.PROCESSING.getCode());
+        // 下载和解析开始。
+        taskService.updateProgress(taskId, 10);
         int chunkCount = processor.parseAndSaveChunks(taskId);
         documentService.markParseStatus(task.getDocumentId(),
                 DocumentProcessStatus.PARSED.getCode());
+        // 解析阶段占总流程的前 30%。
+        taskService.updateProgress(taskId, 30);
         log.info("文档解析完成, taskId={}, docId={}, chunks={}", taskId, task.getDocumentId(), chunkCount);
     }
 }

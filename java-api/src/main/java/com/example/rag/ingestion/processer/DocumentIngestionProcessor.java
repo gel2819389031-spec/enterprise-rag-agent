@@ -8,10 +8,12 @@ import com.example.rag.ingestion.chunk.TextChunker;
 import com.example.rag.ingestion.chunk.TextChunkerFactory;
 import com.example.rag.ingestion.chunk.TextNormalizer;
 import com.example.rag.ingestion.entity.IngestionTask;
+import com.example.rag.ingestion.enums.IngestionStepCode;
 import com.example.rag.ingestion.parser.DocumentParser;
 import com.example.rag.ingestion.parser.ParsedDocument;
 import com.example.rag.ingestion.persistence.ChunkPersistenceService;
 import com.example.rag.ingestion.service.IngestionTaskService;
+import com.example.rag.ingestion.service.IngestionTaskStepService;
 import com.example.rag.knowledge.entity.KnowledgeDocument;
 import com.example.rag.knowledge.enums.DocumentProcessStatus;
 import com.example.rag.knowledge.entity.KnowledgeDocumentChunk;
@@ -30,6 +32,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Supplier;
 
 /**
  * 文档入库处理器。
@@ -55,30 +58,31 @@ public class DocumentIngestionProcessor {
     private final IdGenerator idGenerator;
     private final ObjectMapper objectMapper;
     private final ChunkPersistenceService chunkPersistenceService;
+    private final IngestionTaskStepService taskStepService;
 
     /**
      * 执行文档解析、切分和 Chunk 入库（含任务状态管理）。
      *
      * @deprecated 新代码请使用 {@link #parseAndSaveChunks(Long)} + 流水线编排。
      */
-    @Transactional(rollbackFor = Exception.class)
-    @Deprecated
-    public void process(Long taskId) {
-        try {
-            IngestionTask task = ingestionTaskService.getTask(taskId);
-            ingestionTaskService.markTaskRunning(taskId);
-
-            parseAndSaveChunks(taskId);
-
-            documentService.markParseStatus(task.getDocumentId(),
-                    DocumentProcessStatus.PARSED.getCode());
-            ingestionTaskService.markTaskSuccess(taskId);
-        } catch (Exception ex) {
-            log.error("文档入库处理失败, taskId={}", taskId, ex);
-            ingestionTaskService.markTaskFailed(taskId, safeErrorMessage(ex));
-            throw new DocumentIngestionException(taskId, ex);
-        }
-    }
+//    @Transactional(rollbackFor = Exception.class)
+//    @Deprecated
+//    public void process(Long taskId) {
+//        try {
+//            IngestionTask task = ingestionTaskService.getTask(taskId);
+//            ingestionTaskService.markTaskRunning(taskId);
+//
+//            parseAndSaveChunks(taskId);
+//
+//            documentService.markParseStatus(task.getDocumentId(),
+//                    DocumentProcessStatus.PARSED.getCode());
+//            ingestionTaskService.markTaskSuccess(taskId);
+//        } catch (Exception ex) {
+//            log.error("文档入库处理失败, taskId={}", taskId, ex);
+//            ingestionTaskService.markTaskFailed(taskId, safeErrorMessage(ex));
+//            throw new DocumentIngestionException(taskId, ex);
+//        }
+//    }
 
     /**
      * 执行文档解析、切分和 Chunk 入库（不含任务状态管理）。
@@ -93,16 +97,110 @@ public class DocumentIngestionProcessor {
         IngestionTask task = ingestionTaskService.getTask(taskId);
         KnowledgeDocument document = documentService.getDocument(task.getDocumentId());
 
-        ParsedDocument parsedDocument = parseDocument(document);
-        String normalizedText = textNormalizer.normalize(parsedDocument.getText());
+        // 第一阶段：从对象存储下载文件并解析文本。
+        ParsedDocument parsedDocument = executeTrackedStep(
+                taskId,
+                IngestionStepCode.PARSE_DOCUMENT,
+                () -> parseDocument(document)
+        );
+        // 第二阶段：清洗文本并执行分块。
+        List<TextChunk> chunks = executeTrackedStep(
+                taskId,
+                IngestionStepCode.SPLIT_CHUNK,
+                () -> splitDocument(parsedDocument)
+        );
 
-        TextChunker chunker = textChunkerFactory.getChunker(DEFAULT_CHUNKER_TYPE);
-        List<TextChunk> chunks = chunker.chunk(normalizedText, DEFAULT_CHUNK_SIZE, DEFAULT_OVERLAP);
-
-        saveChunks(task, document, chunks, chunker.type());
+        // 获取实际使用的分块器，用于保存分块元数据。
+        TextChunker chunker =
+                textChunkerFactory.getChunker(DEFAULT_CHUNKER_TYPE);
+        // 第三阶段：将分块保存到 PostgreSQL。
+        executeTrackedStep(
+                taskId,
+                IngestionStepCode.SAVE_CHUNK,
+                () -> {
+                    saveChunks(
+                            task,
+                            document,
+                            chunks,
+                            chunker.type()
+                    );
+                    return null;
+                }
+        );
         return chunks.size();
+
+    }
+    /**
+     * 清洗解析文本并执行切分。
+     */
+    private List<TextChunk> splitDocument(
+            ParsedDocument parsedDocument
+    ) {
+        // 对解析文本进行换行、空白字符等标准化。
+        String normalizedText =
+                textNormalizer.normalize(parsedDocument.getText());
+
+        // 根据配置取得对应的分块器。
+        TextChunker chunker =
+                textChunkerFactory.getChunker(DEFAULT_CHUNKER_TYPE);
+
+        // 执行文本切分。
+        return chunker.chunk(
+                normalizedText,
+                DEFAULT_CHUNK_SIZE,
+                DEFAULT_OVERLAP
+        );
     }
 
+    /**
+     * 执行一个可跟踪的入库步骤。
+     *
+     * <p>步骤状态单独使用 REQUIRES_NEW 事务保存，因此即使业务失败，
+     * RUNNING 或 FAILED 状态也不会跟随业务事务一起回滚。</p>
+     */
+    private <T> T executeTrackedStep(
+            Long taskId,
+            IngestionStepCode stepCode,
+            Supplier<T> action
+    ) {
+        // 业务开始前将步骤设置为 RUNNING。
+        taskStepService.markRunning(taskId, stepCode);
+
+        try {
+            // 执行当前步骤的真实业务逻辑。
+            T result = action.get();
+
+            // 业务执行完成后将步骤设置为 SUCCESS。
+            taskStepService.markSuccess(taskId, stepCode);
+
+            return result;
+        } catch (RuntimeException exception) {
+            try {
+                // 单独保存当前步骤的失败原因。
+                taskStepService.markFailed(
+                        taskId,
+                        stepCode,
+                        safeErrorMessage(exception)
+                );
+            } catch (Exception statusException) {
+                /*
+                 * 状态保存失败不能覆盖最初的业务异常，
+                 * 将状态异常作为 suppressed exception 附加保存。
+                 */
+                exception.addSuppressed(statusException);
+
+                log.error(
+                        "保存入库步骤失败状态异常, taskId={}, stepCode={}",
+                        taskId,
+                        stepCode.getCode(),
+                        statusException
+                );
+            }
+
+            // 继续抛出原始异常，由 PipelineStep 负责标记整个任务失败。
+            throw exception;
+        }
+    }
     private ParsedDocument parseDocument(KnowledgeDocument document) {
         try (InputStream inputStream = objectStorageService.download(document.getFileUri())) {
             // 调用文档解析器提取纯文本。
@@ -144,6 +242,7 @@ public class DocumentIngestionProcessor {
 
 
     }
+
 
     private String buildMetadata(String fileName, String chunkerType, TextChunk chunk) {
         Map<String,Object> meta=new LinkedHashMap<>();

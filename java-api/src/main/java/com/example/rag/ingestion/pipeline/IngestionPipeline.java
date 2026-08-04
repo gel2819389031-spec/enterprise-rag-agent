@@ -1,6 +1,7 @@
 package com.example.rag.ingestion.pipeline;
 
 import com.example.rag.ingestion.pipeline.*;
+import com.example.rag.ingestion.service.IngestionTaskService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -11,10 +12,13 @@ import java.util.Map;
 public class IngestionPipeline {
 
     private final Map<StepCode, PipelineStep> stepRegistry;
+    private final IngestionTaskService taskService;
 
     public IngestionPipeline(
+            IngestionTaskService taskService,
             Map<String, PipelineStep> stepBeans
     ) {
+        this.taskService = taskService;
         this.stepRegistry = Map.of(
                 StepCode.PARSE,
                 requireBean(stepBeans, ParseStep.class),
@@ -43,6 +47,8 @@ public class IngestionPipeline {
                 actualStart
         );
 
+        // 整条流水线只在启动时设置一次任务 RUNNING。
+        taskService.markTaskRunning(taskId);
         for (StepCode stepCode : StepCode.values()) {
             // 跳过恢复位置之前的步骤。
             if (stepCode.ordinal() < actualStart.ordinal()) {
