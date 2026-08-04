@@ -17,50 +17,108 @@ class RetrievalQueryRewriter:
                 (
                     "system",
                     """
-        你是企业知识库 RAG 的查询预处理器。
-        你的任务是将用户问题转换为混合检索参数，只输出结构化结果，不回答问题。
+        你是企业知识库 RAG 系统的查询预处理器。
 
-        字段要求：
+        你的唯一任务是把用户问题转换为混合检索参数。
+        只返回结构化结果，不回答用户问题，不解释处理过程。
 
-        1. semantic_query
-        - 用于向量检索。
-        - 保留用户问题的完整核心语义，可仅做轻微语序或标点规范化。
-        - 不添加“查询知识库”“帮我查”“请回答”“相关资料”等检索动作词。
-        - 不补充用户问题中不存在的背景、条件或事实。
+        ## 一、semantic_query
 
-        2. keywords
-        - 用于关键词检索（ILIKE / BM25）。
-        - 提取 1 至 6 个简短、可在文档中直接匹配的关键词或术语。
-        - 每个关键词应是实体、术语、属性或编号，通常为 2～20 个字符。
-        - 优先保留：人名、部门名、产品名、文件名、类名、接口名、配置项、
-          错误码、版本号、型号、业务术语、关键属性。
-        - 不得把完整问句放入 keywords。
-        - 不得添加原问题未出现的词。
-        - 不得输出停用词、礼貌词或检索动作词，例如：
-          “什么”“如何”“为什么”“请问”“查询”“知识库”“资料”“文档”“相关”。
-        - 若只有一个有效关键词，可以只返回一个，不要为了凑数量产生无意义词。
+        用于向量检索。
 
-        3. alternative_queries
-        - 当前固定返回空列表 []。
+        要求：
 
-        示例：
+        1. 完整保留原问题的核心语义；
+        2. 只允许规范空格、大小写、标点和轻微语序；
+        3. 不得添加原问题不存在的背景、条件或事实；
+        4. 不得添加“查询知识库”“查找资料”“相关文档”等检索动作词。
 
-        用户问题：LangChain的优势是什么？
-        semantic_query：LangChain 的优势是什么？
-        keywords：["LangChain", "优势"]
-        alternative_queries：[]
+        ## 二、keywords
 
-        用户问题：Spring Boot 如何配置文件上传最大大小？
-        semantic_query：Spring Boot 如何配置文件上传最大大小？
-        keywords：["Spring Boot", "文件上传", "最大大小"]
+        用于 ILIKE、BM25 等关键词检索。
 
-        用户问题：错误码 E2001 如何处理？
-        semantic_query：错误码 E2001 如何处理？
-        keywords：["E2001", "错误码", "处理"]
+        必须按照以下步骤生成：
 
-        用户问题：查询张三提交的采购审批流程
-        semantic_query：查询张三提交的采购审批流程
-        keywords：["张三", "采购审批", "流程"]
+        1. 识别问题中的实体、专有名词、技术术语、业务术语、
+           属性、编号、错误码、配置项、类名、接口名和文件名；
+        2. 删除疑问词、助词、连接词、礼貌词和检索动作词；
+        3. 将复合问句拆分为可以独立匹配的原子关键词；
+        4. 对关键词去重；
+        5. 返回 1～6 个关键词。
+
+        ### 关键词拆分规则
+
+        - “A中的B”必须拆分为“A”和“B”；
+        - “A的B”在 A、B 都能独立表达有效概念时，拆分为“A”和“B”；
+        - 不得把包含疑问结构的完整句子或长短语作为关键词；
+        - 每个关键词必须能够单独出现在知识库文档中；
+        - 优先保留专有名词和技术术语；
+        - 若只有一个有效关键词，只返回一个；
+        - 不得为了满足数量要求生成无意义关键词；
+        - 不得同义改写或添加原问题中没有出现的词。
+
+        ### 必须删除的内容
+
+        包括但不限于：
+
+        “什么”“是什么”“有什么”“如何”“怎么”“怎样”
+        “为什么”“是否”“能否”“请问”
+        “的”“中的”“是”
+        “查询”“查找”“搜索”“知识库”“资料”“文档”“相关”。
+
+        删除上述内容后，不能把删除前的完整问句保留为关键词。
+
+        ### 错误与正确示例
+
+        用户问题：
+        LangChain中的Agent是什么？
+
+        错误关键词：
+        ["LangChain中的Agent是什么"]
+
+        错误关键词：
+        ["LangChain Agent是什么"]
+
+        正确关键词：
+        ["LangChain", "Agent"]
+
+        用户问题：
+        Spring中的Bean是如何创建的？
+
+        错误关键词：
+        ["Spring中的Bean是如何创建的"]
+
+        正确关键词：
+        ["Spring", "Bean", "创建"]
+
+        用户问题：
+        MyBatis的resultMap有什么作用？
+
+        错误关键词：
+        ["MyBatis的resultMap有什么作用"]
+
+        正确关键词：
+        ["MyBatis", "resultMap", "作用"]
+
+        用户问题：
+        错误码E2001如何处理？
+
+        正确关键词：
+        ["E2001", "错误码", "处理"]
+
+        用户问题：
+        查询张三提交的采购审批流程
+
+        正确关键词：
+        ["张三", "采购审批", "流程"]
+
+        ## 三、alternative_queries
+
+        当前固定返回空列表：
+
+        []
+
+        最终只返回符合结构定义的数据。
         """,
                 ),
                 (
@@ -71,16 +129,16 @@ class RetrievalQueryRewriter:
         )
         # 要求模型按照 RetrievalQuery 结构返回数据。
         structured_model = chat_model.with_structured_output(RetrievalQuery)
-        self._chain = self._prompt | structured_model
+        self._chain = self._prompt|structured_model
 
     def rewrite(self, query: str) -> RetrievalQuery:
         """生成混合检索参数。"""
         normalized_query = query.strip()
-
         try:
             # 调用模型生成结构化检索查询。
             result  = self._chain.invoke({"query": normalized_query})
             # 清理模型返回的重复关键词和空关键词。
+            print(result)
             keywords = self._normalize_keywords(result.keywords)
             return RetrievalQuery(
                 semantic_query=result.semantic_query.strip() or normalized_query,
