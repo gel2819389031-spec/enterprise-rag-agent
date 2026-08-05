@@ -54,6 +54,12 @@ public class KnowledgeBase {
      */
     private Integer status;
     /**
+     * 知识库中未逻辑删除的文档数量。
+     * 只允许通过 Mapper 的原子 SQL 更新，防止通用 updateById 覆盖并发计数。
+     */
+    @TableField(updateStrategy = FieldStrategy.NEVER)
+    private Long documentCount;
+    /**
      * 创建人用户 ID。
      */
     private Long createdBy;

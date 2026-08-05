@@ -4,6 +4,7 @@ import {
   Alert, App, Button, Card, Drawer, Input, Popconfirm, Progress,
   Space, Table, Tag, Upload,
 } from 'antd';
+import type { UploadFile } from 'antd';
 import {
   DeleteOutlined, EyeOutlined, InboxOutlined, ReloadOutlined,
 } from '@ant-design/icons';
@@ -20,6 +21,9 @@ const PARSE_STATUS_LABEL: Record<DocumentParseStatus, { color: string; text: str
   READY:      { color: 'success',    text: '处理完成' },
   FAILED:     { color: 'error',      text: '处理失败' },
 };
+
+/** 单次发给后端的最大文件数量，更多文件由前端自动拆分为后续批次。 */
+const UPLOAD_BATCH_SIZE = 20;
 
 /** 轮询任务进度（每 2 秒），直到任务进入终态 */
 function useTaskPolling(documentId: string | undefined) {
@@ -39,7 +43,9 @@ export function DocumentsPage() {
     qc = useQueryClient(),
     { message } = App.useApp();
   const [search, setSearch] = useState(''),
-    [progress, setProgress] = useState<Record<string, number>>({}),
+    [uploadFiles, setUploadFiles] = useState<UploadFile[]>([]),
+    [uploadProgress, setUploadProgress] = useState<number | null>(null),
+    [uploading, setUploading] = useState(false),
     [doc, setDoc] = useState<KnowledgeDocument | null>(null),
     [trackingDocId, setTrackingDocId] = useState<string | undefined>();
 
@@ -51,6 +57,37 @@ export function DocumentsPage() {
     queryKey: ['documents', knowledgeBaseId],
     queryFn: () => documentApi.list(knowledgeBaseId),
     enabled: Boolean(knowledgeBaseId),
+    // 存在未完成文档时定时刷新状态；全部进入终态后自动停止轮询。
+    refetchInterval: (query) => {
+      const documents = query.state.data;
+      const hasActiveDocument = documents?.some(
+        (document) =>
+          document.parseStatus !== 'READY' &&
+          document.parseStatus !== 'FAILED',
+      );
+
+      return hasActiveDocument ? 2000 : false;
+    },
+  });
+
+  const hasActiveDocuments = docs.data?.some(
+    (document) =>
+      document.parseStatus !== 'READY' &&
+      document.parseStatus !== 'FAILED',
+  ) ?? false;
+
+  // 只查询正在执行的任务，而不是为每个文档分别发送进度请求。
+  const runningTasks = useQuery({
+    queryKey: ['running-tasks', knowledgeBaseId],
+    queryFn: () =>
+      taskApi.page({
+        knowledgeBaseId,
+        status: 'RUNNING',
+        pageNo: 1,
+        pageSize: 100,
+      }),
+    enabled: Boolean(knowledgeBaseId) && hasActiveDocuments,
+    refetchInterval: hasActiveDocuments ? 2000 : false,
   });
   const chunks = useQuery({
     queryKey: ['chunks', doc?.id],
@@ -63,6 +100,17 @@ export function DocumentsPage() {
   const filtered = useMemo(
     () => docs.data?.filter((d) => d.fileName.toLowerCase().includes(search.toLowerCase())) ?? [],
     [docs.data, search],
+  );
+
+  // 按文档 ID 建立运行中任务索引，供表格逐行展示真实进度。
+  const runningTaskByDocumentId = useMemo(
+    () =>
+      new Map(
+        runningTasks.data?.records.map(
+          (task) => [task.documentId, task],
+        ) ?? [],
+      ),
+    [runningTasks.data],
   );
 
   // 已完成的文档 ID 集合
@@ -88,18 +136,65 @@ export function DocumentsPage() {
     onError: (e) => message.error(e instanceof Error ? e.message : '重试失败'),
   });
 
-  const upload = async (file: File) => {
-    try {
-      const doc = await documentApi.upload(knowledgeBaseId, file, (n) =>
-        setProgress((p) => ({ ...p, [file.name + '_' + file.size + '_' + file.lastModified]: n })),
-      );
-      message.success(`${file.name} 上传成功，已自动开始处理`);
-      setTrackingDocId(doc.id); // 开始轮询此文档的处理进度
-      void qc.invalidateQueries({ queryKey: ['documents', knowledgeBaseId] });
-    } catch (e) {
-      message.error(e instanceof Error ? e.message : '上传失败');
+  /**
+   * 将用户选择的文件按每批 20 个串行上传。
+   * 当前批次完成后才发送下一批，避免大量文件同时占用后端资源。
+   */
+  const upload = async () => {
+    const pendingFiles = uploadFiles.flatMap((item) =>
+      item.originFileObj
+        ? [{ uid: item.uid, file: item.originFileObj }]
+        : [],
+    );
+
+    if (pendingFiles.length === 0) {
+      message.warning('请先选择需要上传的文件');
+      return;
     }
-    return false;
+
+    setUploading(true);
+    setUploadProgress(0);
+
+    try {
+      for (let start = 0; start < pendingFiles.length; start += UPLOAD_BATCH_SIZE) {
+        // 从完整队列中取出当前批次，最多包含 20 个文件。
+        const batch = pendingFiles.slice(start, start + UPLOAD_BATCH_SIZE);
+
+        const documents = await documentApi.upload(
+          knowledgeBaseId,
+          batch.map((item) => item.file),
+          (batchProgress) => {
+            // 将当前批次进度换算为整个文件队列的总进度。
+            const uploadedEquivalent = start + (batch.length * batchProgress) / 100;
+            setUploadProgress(
+              Math.round((uploadedEquivalent / pendingFiles.length) * 100),
+            );
+          },
+        );
+
+        // 当前批次成功后从待上传列表移除，后续失败时只需重试剩余文件。
+        const uploadedUids = new Set(batch.map((item) => item.uid));
+        setUploadFiles((current) =>
+          current.filter((item) => !uploadedUids.has(item.uid)),
+        );
+
+        // 选择本批最后一个文档用于展示异步处理进度。
+        const latestDocument = documents[documents.length - 1];
+        if (latestDocument) {
+          setTrackingDocId(latestDocument.id);
+        }
+
+        // 每批完成后刷新一次列表，让用户及时看到已登记的文档。
+        await qc.invalidateQueries({ queryKey: ['documents', knowledgeBaseId] });
+      }
+
+      setUploadProgress(100);
+      message.success(`${pendingFiles.length} 个文件已上传，正在后台处理`);
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : '批量上传失败，剩余文件可重新上传');
+    } finally {
+      setUploading(false);
+    }
   };
 
   return (
@@ -155,17 +250,55 @@ export function DocumentsPage() {
       })()}
 
       <Card className="upload-panel">
-        <Upload.Dragger multiple showUploadList={false} beforeUpload={upload}>
+        <Upload.Dragger
+          multiple
+          showUploadList={false}
+          disabled={uploading}
+          fileList={uploadFiles}
+          beforeUpload={() => false}
+          onChange={({ fileList }) => {
+            setUploadFiles(fileList);
+            if (!uploading) {
+              setUploadProgress(null);
+            }
+          }}
+        >
           <InboxOutlined className="upload-icon" />
           <p>拖拽或点击选择多个文件</p>
-          <span>上传后自动开始处理，无需手动触发</span>
+          <span>文件数量不限，前端将按每批 20 个依次上传</span>
         </Upload.Dragger>
-        {Object.entries(progress).map(([name, n]) => (
-          <div key={name} className="upload-progress">
-            <span>{name}</span>
-            <Progress percent={n} size="small" />
+        {uploadFiles.length > 0 && (
+          <Alert
+            style={{ marginTop: 16 }}
+            type="info"
+            showIcon
+            message={`已选择 ${uploadFiles.length} 个文件`}
+            description="上传时将按每批 20 个文件依次提交，文件处理状态会自动刷新。"
+          />
+        )}
+        <Space style={{ marginTop: 16 }}>
+          <Button
+            type="primary"
+            loading={uploading}
+            disabled={uploadFiles.length === 0}
+            onClick={() => void upload()}
+          >
+            上传 {uploadFiles.length > 0 ? `${uploadFiles.length} 个文件` : ''}
+          </Button>
+          {uploadFiles.length > 0 && !uploading && (
+            <Button onClick={() => setUploadFiles([])}>清空列表</Button>
+          )}
+        </Space>
+        {uploadProgress !== null && (
+          <div className="upload-progress">
+            <span>总体上传进度</span>
+            <Progress
+              percent={uploadProgress}
+              size="small"
+              status={uploading ? 'active' : undefined}
+            />
           </div>
-        ))}
+        )}
       </Card>
 
       <div className="filter-bar">
@@ -185,6 +318,40 @@ export function DocumentsPage() {
               const s = PARSE_STATUS_LABEL[v as DocumentParseStatus]
                      ?? { color: 'default' as const, text: v };
               return <Tag color={s.color}>{s.text}</Tag>;
+            },
+          },
+          {
+            title: '处理进度',
+            width: 180,
+            render: (_, document: KnowledgeDocument) => {
+              const task = runningTaskByDocumentId.get(document.id);
+
+              // 文档终态优先于任务查询缓存，避免最后一次轮询残留旧进度。
+              if (document.parseStatus === 'READY') {
+                return <Progress percent={100} size="small" />;
+              }
+
+              if (document.parseStatus === 'FAILED') {
+                return (
+                  <Progress
+                    percent={0}
+                    size="small"
+                    status="exception"
+                  />
+                );
+              }
+
+              if (task) {
+                return (
+                  <Progress
+                    percent={task.progress}
+                    size="small"
+                    status="active"
+                  />
+                );
+              }
+
+              return <Progress percent={0} size="small" />;
             },
           },
           { title: '更新时间', dataIndex: 'updatedAt',

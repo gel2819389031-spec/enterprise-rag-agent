@@ -9,7 +9,6 @@ import {
   FileSearchOutlined,
   LogoutOutlined,
   RobotOutlined,
-  SettingOutlined,
   UnorderedListOutlined,
 } from '@ant-design/icons';
 import { useMutation } from '@tanstack/react-query';
@@ -20,10 +19,9 @@ const items = [
   ['/dashboard', <AppstoreOutlined />, '总览'],
   ['/knowledge', <BookOutlined />, '知识库'],
   ['/chat', <CommentOutlined />, 'RAG 对话'],
-  ['/retrieval', <ExperimentOutlined />, '检索调试'],
+  ['/retrieval', <ExperimentOutlined />, 'RAG 测评'],
   ['/tasks', <UnorderedListOutlined />, '任务中心'],
   ['/traces', <FileSearchOutlined />, 'Trace'],
-  ['/settings', <SettingOutlined />, '模型与配置'],
 ].map(([key, icon, label]) => ({ key: key as string, icon, label }));
 export function ConsoleLayout() {
   const nav = useNavigate(),

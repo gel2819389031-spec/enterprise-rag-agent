@@ -18,6 +18,7 @@ from app.config import get_settings
 from app.api.retrieval_debug_api import (
     router as retrieval_debug_router,
 )
+from app.api.evaluation_api import router as evaluation_router
 
 
 def create_app() -> FastAPI:
@@ -44,6 +45,8 @@ def create_app() -> FastAPI:
     app.include_router(chat_router)
     # 注册检索调试接口。
     app.include_router(retrieval_debug_router)
+    # 注册异步 RAG 检索测评接口。
+    app.include_router(evaluation_router)
 
     return app
 

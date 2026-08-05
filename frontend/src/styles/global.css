@@ -4,6 +4,12 @@
   background: #f4f6fa;
   font-synthesis: none;
 }
+html,
+body,
+#root {
+  height: 100%;
+  overflow: hidden;
+}
 * {
   box-sizing: border-box;
 }
@@ -17,7 +23,13 @@ textarea {
   letter-spacing: 0;
 }
 .shell {
-  min-height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+}
+.shell > .ant-layout {
+  min-width: 0;
+  min-height: 0;
 }
 .brand {
   height: 72px;
@@ -56,6 +68,7 @@ textarea {
 }
 .content {
   padding: 26px 28px 40px;
+  min-height: 0;
   overflow: auto;
 }
 .page-head {
@@ -163,16 +176,19 @@ textarea {
   box-shadow: 0 18px 50px #25325c20;
 }
 .chat-workspace {
-  height: calc(100vh - 116px);
+  height: 100%;
+  min-height: 0;
   display: grid;
-  grid-template-columns: 280px 1fr;
+  grid-template-columns: 280px minmax(0, 1fr);
+  overflow: hidden;
   background: #fff;
   border: 1px solid #e5e9f1;
 }
 .conversation-panel {
   padding: 16px;
+  min-height: 0;
   border-right: 1px solid #e8ebf2;
-  overflow: auto;
+  overflow-y: auto;
 }
 .conversation-panel .ant-list-item {
   cursor: pointer;
@@ -183,8 +199,10 @@ textarea {
 }
 .chat-main {
   display: grid;
-  grid-template-rows: 58px 1fr auto;
+  grid-template-rows: 58px minmax(0, 1fr) auto;
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 .chat-toolbar {
   padding: 10px 18px;
@@ -195,7 +213,9 @@ textarea {
 }
 .messages {
   padding: 28px max(30px, 10vw);
-  overflow: auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .message {
   display: grid;

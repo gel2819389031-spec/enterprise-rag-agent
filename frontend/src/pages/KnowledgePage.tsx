@@ -107,6 +107,12 @@ export function KnowledgePage() {
             render: (v) => <Tag color={v === 'PRIVATE' ? 'blue' : 'green'}>{v}</Tag>,
           },
           {
+            title: '文档数',
+            dataIndex: 'documentCount',
+            width: 100,
+            render: (value) => Number(value ?? 0).toLocaleString(),
+          },
+          {
             title: '更新时间',
             dataIndex: 'updatedAt',
             render: (v) => new Date(v).toLocaleString(),

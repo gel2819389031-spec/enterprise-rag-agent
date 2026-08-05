@@ -59,6 +59,7 @@ export interface KnowledgeBase {
   embeddingModelConfigId?: string;
   chunkStrategy?: string;
   status: number;
+  documentCount: number;
   createdBy: string;
   createdAt: string;
   updatedAt: string;

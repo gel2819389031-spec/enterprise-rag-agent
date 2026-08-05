@@ -8,7 +8,7 @@ import { DocumentsPage } from '../pages/DocumentsPage';
 import { ChatPage } from '../pages/ChatPage';
 import { TaskPage } from '../pages/TaskPage';
 import { PlaceholderPage } from '../pages/PlaceholderPage';
-import { RetrievalDebugPage } from '../pages/RetrievalDebugPage';
+import { RagEvaluationPage } from '../pages/RagEvaluationPage';
 function Guard() {
   return useAuthStore((s) => s.accessToken) ? <Outlet /> : <Navigate to="/login" replace />;
 }
@@ -26,8 +26,7 @@ const router = createBrowserRouter([
           { path: '/knowledge/:knowledgeBaseId/documents', element: <DocumentsPage /> },
           { path: '/chat', element: <ChatPage /> },
           { path: '/tasks', element: <TaskPage /> },
-          { path: '/retrieval', element: <RetrievalDebugPage /> },
-          { path: '/settings', element: <PlaceholderPage kind="settings" /> },
+          { path: '/retrieval', element: <RagEvaluationPage /> },
           { path: '/traces', element: <PlaceholderPage kind="traces" /> },
         ],
       },

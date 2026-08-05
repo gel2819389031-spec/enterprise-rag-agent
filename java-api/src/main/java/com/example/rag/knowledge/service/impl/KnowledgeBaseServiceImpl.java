@@ -7,6 +7,7 @@ import com.example.rag.common.context.UserContext;
 import com.example.rag.common.error.BaseErrorCode;
 import com.example.rag.common.error.BusinessException;
 import com.example.rag.common.error.ClientException;
+import com.example.rag.common.error.ServiceException;
 import com.example.rag.common.id.IdGenerator;
 import com.example.rag.common.security.CurrentUserProvider;
 import com.example.rag.knowledge.dto.KnowledgeBaseCreateRequest;
@@ -61,6 +62,7 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
                 .visibility(defaultIfBlank(request.getVisibility(), DEFAULT_VISIBILITY))
                 .chunkStrategy(DEFAULT_CHUNK_STRATEGY)
                 .status(1)
+                .documentCount(0L)
                 .createdBy(currentUserId)
                 .build();
         // 调用 Mapper 将知识库记录写入数据库。
@@ -154,6 +156,18 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
             chunkMapper.deleteByDocumentIdPhysically(doc.getId());
             // 3. 逻辑删除文档
             documentMapper.deleteById(doc.getId());
+        }
+
+        // 文档全部逻辑删除后将知识库缓存计数归零。
+        int updatedRows = knowledgeBaseMapper.resetDocumentCount(
+                knowledgeBaseId,
+                kb.getTenantId()
+        );
+        if (updatedRows != 1) {
+            throw new ServiceException(
+                    BaseErrorCode.DATABASE_ERROR,
+                    "重置知识库文档数量失败"
+            );
         }
 
         // 4. 逻辑删除 KB

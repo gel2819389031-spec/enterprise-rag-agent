@@ -37,7 +37,9 @@ const modeOptions = [
 
 const formatMillis = (value: number | string) => `${Number(value).toLocaleString()} ms`;
 
-export function RetrievalDebugPage() {
+export function RetrievalDebugPage(
+  { embedded = false }: { embedded?: boolean } = {},
+) {
   const { message } = App.useApp();
   const [form] = Form.useForm<RetrievalDebugRequest>();
   const mode = Form.useWatch('mode', form) ?? 'HYBRID';
@@ -79,7 +81,12 @@ export function RetrievalDebugPage() {
 
   return (
     <>
-      <PageHeader title="检索调试台" description="逐阶段检查查询改写、召回、融合、重排和最终上下文" />
+      {!embedded && (
+        <PageHeader
+          title="检索调试台"
+          description="逐阶段检查查询改写、召回、融合、重排和最终上下文"
+        />
+      )}
 
       <Card className="retrieval-form-card">
         <Form<RetrievalDebugRequest>

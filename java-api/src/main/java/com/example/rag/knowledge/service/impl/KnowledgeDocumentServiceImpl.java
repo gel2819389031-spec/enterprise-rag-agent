@@ -19,6 +19,7 @@ import com.example.rag.knowledge.entity.KnowledgeDocumentChunk;
 import com.example.rag.knowledge.enums.DocumentProcessStatus;
 import com.example.rag.knowledge.mapper.KnowledgeDocumentChunkMapper;
 import com.example.rag.knowledge.mapper.KnowledgeDocumentMapper;
+import com.example.rag.knowledge.mapper.KnowledgeBaseMapper;
 import com.example.rag.knowledge.service.KnowledgeBaseService;
 import com.example.rag.knowledge.service.KnowledgeDocumentService;
 import lombok.RequiredArgsConstructor;
@@ -45,6 +46,7 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
 
     private final ObjectStorageService objectStorageService;
     private final KnowledgeDocumentMapper documentMapper;
+    private final KnowledgeBaseMapper knowledgeBaseMapper;
     private final KnowledgeBaseService knowledgeBaseService;
     private final IdGenerator idGenerator;
     private final CurrentUserProvider currentUserProvider;
@@ -106,6 +108,23 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
             throw new ServiceException(BaseErrorCode.SERVICE_ERROR, "读取上传文件失败", e);
         }
         String contentHash = FileHashUtils.sha256Hex(fileBytes);
+
+        // 相同知识库中内容哈希相同的文件直接返回已有记录，保证上传幂等。
+        KnowledgeDocument existingDocument = findActiveDocumentByContentHash(
+                knowledgeBase.getTenantId(),
+                knowledgeBaseId,
+                contentHash
+        );
+        if (existingDocument != null) {
+            log.info(
+                    "跳过重复文档上传, knowledgeBaseId={}, existingDocumentId={}, fileName={}",
+                    knowledgeBaseId,
+                    existingDocument.getId(),
+                    originalFilename
+            );
+            return existingDocument;
+        }
+
         Long documentId = idGenerator.nextId();
 
         // 生成对象存储 objectKey。
@@ -142,6 +161,29 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
         } catch (Exception exception) {
             // 数据库登记失败时，清理本次上传的独立对象。
             deleteUploadedObjectSafely(objectKey);
+
+            // 并发上传相同文件时，数据库唯一索引只允许一个请求成功。
+            if (isDuplicateContentException(exception)) {
+                KnowledgeDocument concurrentDocument =
+                        findActiveDocumentByContentHash(
+                                knowledgeBase.getTenantId(),
+                                knowledgeBaseId,
+                                contentHash
+                        );
+                if (concurrentDocument != null) {
+                    log.info(
+                            "并发重复文档已由其他请求创建, knowledgeBaseId={}, documentId={}",
+                            knowledgeBaseId,
+                            concurrentDocument.getId()
+                    );
+                    return concurrentDocument;
+                }
+
+                throw new ClientException(
+                        BaseErrorCode.BAD_REQUEST,
+                        "知识库中已存在内容相同的文档"
+                );
+            }
             throw exception;
         }
         return document;
@@ -151,6 +193,7 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
      * 登记文档元数据，并确认目标知识库可用。
      */
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public KnowledgeDocument registerDocument(KnowledgeDocument document) {
         // 登记文档前先校验知识库存在、属于当前租户且处于可用状态。
         KnowledgeBase knowledgeBase = knowledgeBaseService.ensureUsable(document.getKnowledgeBaseId());
@@ -162,8 +205,37 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
         document.setParseStatus(defaultIfBlank(document.getParseStatus(), DEFAULT_PARSE_STATUS));
         // 如果调用方未传创建人，则从当前用户上下文中读取。
         document.setCreatedBy(document.getCreatedBy() == null ? currentUserProvider.requireUserId() : document.getCreatedBy());
+
+        // 手动登记接口同样按内容哈希判重。
+        if (!isBlank(document.getContentHash())) {
+            KnowledgeDocument existingDocument =
+                    findActiveDocumentByContentHash(
+                            document.getTenantId(),
+                            document.getKnowledgeBaseId(),
+                            document.getContentHash()
+                    );
+            if (existingDocument != null) {
+                return existingDocument;
+            }
+        }
+
         // 调用 Mapper 将文档元数据写入数据库。
-        documentMapper.insert(document);
+        try {
+            documentMapper.insert(document);
+        } catch (Exception exception) {
+            if (isDuplicateContentException(exception)) {
+                throw new ClientException(
+                        BaseErrorCode.BAD_REQUEST,
+                        "知识库中已存在内容相同的文档"
+                );
+            }
+            throw exception;
+        }
+        // 文档创建成功后原子增加知识库文档数量。
+        incrementDocumentCount(
+                document.getKnowledgeBaseId(),
+                document.getTenantId()
+        );
         return document;
     }
 
@@ -217,9 +289,16 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
     @Transactional(rollbackFor = Exception.class)
     public void deleteDocument(Long documentId) {
         // 删除前先查询文档，确保文档存在且属于当前租户。
-        getDocument(documentId);
+        KnowledgeDocument document = getDocument(documentId);
         // 调用 MyBatis-Plus 删除方法，实际会根据 @TableLogic 执行逻辑删除。
-        documentMapper.deleteById(documentId);
+        int deletedRows = documentMapper.deleteById(documentId);
+        if (deletedRows == 1) {
+            // 仅在文档本次确实从未删除变为已删除时递减，避免重复扣减。
+            decrementDocumentCount(
+                    document.getKnowledgeBaseId(),
+                    document.getTenantId()
+            );
+        }
     }
 
     @Override
@@ -311,5 +390,94 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
 
     private boolean isBlank(String value) {
         return value == null || value.isBlank();
+    }
+
+    /**
+     * 查询知识库中内容哈希相同的未删除文档。
+     */
+    private KnowledgeDocument findActiveDocumentByContentHash(
+            Long tenantId,
+            Long knowledgeBaseId,
+            String contentHash
+    ) {
+        if (isBlank(contentHash)) {
+            return null;
+        }
+
+        return documentMapper.selectOne(
+                Wrappers
+                        .<KnowledgeDocument>lambdaQuery()
+                        .eq(
+                                KnowledgeDocument::getTenantId,
+                                tenantId
+                        )
+                        .eq(
+                                KnowledgeDocument::getKnowledgeBaseId,
+                                knowledgeBaseId
+                        )
+                        .eq(
+                                KnowledgeDocument::getContentHash,
+                                contentHash
+                        )
+                        .last("LIMIT 1")
+        );
+    }
+
+    /**
+     * 判断异常链是否来自文档内容哈希唯一索引冲突。
+     */
+    private boolean isDuplicateContentException(
+            Throwable throwable
+    ) {
+        Throwable current = throwable;
+        while (current != null) {
+            String message = current.getMessage();
+            if (message != null
+                    && message.contains(
+                    "uk_document_active_content_hash"
+            )) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
+    }
+
+    /**
+     * 原子增加知识库文档数量，并校验目标知识库仍然有效。
+     */
+    private void incrementDocumentCount(
+            Long knowledgeBaseId,
+            Long tenantId
+    ) {
+        int updatedRows = knowledgeBaseMapper.incrementDocumentCount(
+                knowledgeBaseId,
+                tenantId
+        );
+        if (updatedRows != 1) {
+            throw new ServiceException(
+                    BaseErrorCode.DATABASE_ERROR,
+                    "更新知识库文档数量失败"
+            );
+        }
+    }
+
+    /**
+     * 原子减少知识库文档数量，并校验更新成功。
+     */
+    private void decrementDocumentCount(
+            Long knowledgeBaseId,
+            Long tenantId
+    ) {
+        int updatedRows = knowledgeBaseMapper.decrementDocumentCount(
+                knowledgeBaseId,
+                tenantId
+        );
+        if (updatedRows != 1) {
+            throw new ServiceException(
+                    BaseErrorCode.DATABASE_ERROR,
+                    "更新知识库文档数量失败"
+            );
+        }
     }
 }

@@ -18,7 +18,7 @@ export function ChatPage() {
     [live, setLive] = useState<LiveMessage[]>([]),
     [streaming, setStreaming] = useState(false);
   const abort = useRef<AbortController>();
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesRef = useRef<HTMLDivElement>(null);
   const [convPage, setConvPage] = useState(1);
   const conversations = useQuery({
       queryKey: ['conversations', convPage],
@@ -43,7 +43,14 @@ export function ChatPage() {
   }, [messages.data]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const container = messagesRef.current;
+    if (!container) return;
+
+    // 只滚动消息容器，避免 scrollIntoView 带动整个控制台页面。
+    container.scrollTo({
+      top: container.scrollHeight,
+      behavior: 'smooth',
+    });
   }, [live]);
   const remove = useMutation({
     mutationFn: chatApi.remove,
@@ -159,7 +166,7 @@ export function ChatPage() {
           />
           <Tag color="blue">RAG 模式</Tag>
         </div>
-        <div className="messages">
+        <div ref={messagesRef} className="messages">
           {live.length === 0 ? (
             <Empty description="选择知识库，开始一次有依据的对话" />
           ) : (
@@ -173,7 +180,6 @@ export function ChatPage() {
               </div>
             ))
           )}
-          <div ref={messagesEndRef} />
         </div>
         <div className="composer">
           <Input.TextArea

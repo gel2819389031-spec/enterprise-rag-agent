@@ -16,6 +16,15 @@ spring:
     username: ${RAG_DB_USERNAME:rag}
     # 默认数据库密码；真实密码不要写入代码仓库。
     password: ${RAG_DB_PASSWORD:rag}
+    hikari:
+      pool-name: enterprise-rag-hikari-pool
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 10000
+      validation-timeout: 3000
+      idle-timeout: 300000
+      max-lifetime: 600000
+      keepalive-time: 120000
   flyway:
     # 应用启动时自动执行未运行过的数据库迁移脚本。
     enabled: true

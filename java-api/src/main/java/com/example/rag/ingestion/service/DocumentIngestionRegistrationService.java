@@ -8,7 +8,10 @@ import com.example.rag.ingestion.event.IngestionTaskStartEvent;
 import com.example.rag.ingestion.metrics.IngestionMetrics;
 import com.example.rag.ingestion.pipeline.StepCode;
 import com.example.rag.knowledge.entity.KnowledgeDocument;
+import com.example.rag.knowledge.mapper.KnowledgeBaseMapper;
 import com.example.rag.knowledge.mapper.KnowledgeDocumentMapper;
+import com.example.rag.common.error.BaseErrorCode;
+import com.example.rag.common.error.ServiceException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
@@ -28,6 +31,8 @@ public class DocumentIngestionRegistrationService {
 
     private final KnowledgeDocumentMapper documentMapper;
 
+    private final KnowledgeBaseMapper knowledgeBaseMapper;
+
     private final IngestionTaskService ingestionTaskService;
 
     private final ApplicationEventPublisher eventPublisher;
@@ -44,6 +49,18 @@ public class DocumentIngestionRegistrationService {
     ) {
         // 保存文档元数据。
         documentMapper.insert(document);
+
+        // 文档插入和知识库计数递增处于同一事务，任一失败都会整体回滚。
+        int updatedRows = knowledgeBaseMapper.incrementDocumentCount(
+                document.getKnowledgeBaseId(),
+                document.getTenantId()
+        );
+        if (updatedRows != 1) {
+            throw new ServiceException(
+                    BaseErrorCode.DATABASE_ERROR,
+                    "更新知识库文档数量失败"
+            );
+        }
 
         // 使用已保存文档的 ID 创建入库任务。
         command.setDocumentId(document.getId());
