@@ -31,6 +31,7 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -49,6 +50,44 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
     private final CurrentUserProvider currentUserProvider;
     private final KnowledgeDocumentChunkMapper chunkMapper;
     private final DocumentIngestionRegistrationService registrationService;
+
+    /**
+     * 批量上传文档。
+     *
+     * <p>批量方法只负责组织调用，单个文件仍复用原有上传、登记和异步入库流程。</p>
+     */
+    @Override
+    public List<KnowledgeDocument> uploadDocuments(
+            Long knowledgeBaseId,
+            List<MultipartFile> files,
+            String metadata
+    ) {
+        // 文件列表不能为空。
+        if (files == null || files.isEmpty()) {
+            throw new ClientException(
+                    BaseErrorCode.BAD_REQUEST,
+                    "上传文件列表不能为空"
+            );
+        }
+
+        List<KnowledgeDocument> documents =
+                new ArrayList<>(files.size());
+
+        for (MultipartFile file : files) {
+            // 每个文件独立复用原有上传逻辑，并分别启动后续异步流水线。
+            KnowledgeDocument document =
+                    uploadDocument(
+                            knowledgeBaseId,
+                            file,
+                            metadata
+                    );
+
+            // 汇总本批次已成功登记的文档。
+            documents.add(document);
+        }
+
+        return documents;
+    }
 
     @Override
     public KnowledgeDocument uploadDocument(Long knowledgeBaseId, MultipartFile file, String metadata) {

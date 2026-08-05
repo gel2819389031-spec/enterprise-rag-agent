@@ -13,8 +13,19 @@ import java.util.List;
  */
 public interface KnowledgeDocumentService {
 
-
-
+    /**
+     * 批量上传文件到对象存储，并为每个文件分别创建文档和入库任务。
+     *
+     * @param knowledgeBaseId 知识库 ID
+     * @param files 待上传文件列表
+     * @param metadata 公共元数据
+     * @return 已创建的文档列表
+     */
+    List<KnowledgeDocument> uploadDocuments(
+            Long knowledgeBaseId,
+            List<MultipartFile> files,
+            String metadata
+    );
 
     /**
      * 上传文件到对象存储，并登记文档元数据。

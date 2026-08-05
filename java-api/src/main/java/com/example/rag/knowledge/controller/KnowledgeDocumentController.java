@@ -37,10 +37,19 @@ public class KnowledgeDocumentController {
      * 上传文件并登记文档元数据。
      */
     @PostMapping("/upload")
-    public ApiResult<KnowledgeDocument> uploadDocument(@RequestParam("knowledgeBaseId") Long knowledgeBaseId,
-                                                       @RequestParam("file") MultipartFile file,
-                                                       @RequestParam(required = false,value = "metadata") String metadata) {
-        return ApiResult.ok(documentService.uploadDocument(knowledgeBaseId, file, metadata));
+    public ApiResult<List<KnowledgeDocument>> uploadDocuments(
+            @RequestParam("knowledgeBaseId") Long knowledgeBaseId,
+            @RequestParam("file") List<MultipartFile> files,
+            @RequestParam(required = false, value = "metadata") String metadata
+    ) {
+        // 一个或多个同名 file 字段都会被 Spring 转换为文件列表。
+        return ApiResult.ok(
+                documentService.uploadDocuments(
+                        knowledgeBaseId,
+                        files,
+                        metadata
+                )
+        );
     }
     /**
      * 登记文档元数据。
