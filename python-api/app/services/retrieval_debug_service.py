@@ -26,7 +26,9 @@ from app.schemas.retrieval_debug_schema import (
 from app.schemas.retrieval_schema import RetrievalCandidate
 from app.schemas.routing_schema import RetrievalQuery
 from app.services.rerank_service import RerankService
-
+from app.retriever.parallel_retrieval import (
+    run_parallel_retrieval,
+)
 class RetrievalDebugService:
     """执行完整检索流程，但不调用 LLM 生成答案。"""
 
@@ -97,55 +99,60 @@ class RetrievalDebugService:
         vector_error: Exception | None = None
         keyword_error: Exception | None = None
 
-        # 2. 根据检索模式决定是否执行向量检索。
-        if request.mode in (
-                RetrievalMode.VECTOR,
-                RetrievalMode.HYBRID,
-        ):
+        if request.mode == RetrievalMode.HYBRID:
+            # 混合模式下并行执行两路检索。
+            vector_result, keyword_result = run_parallel_retrieval(
+                vector_call=lambda: self._vector_retriever.retrieve(
+                    question=retrieval_query.semantic_query,
+                    tenant_id=request.tenant_id,
+                    knowledge_base_id=request.knowledge_base_id,
+                    top_k=vector_top_k,
+                ),
+                keyword_call=lambda: self._keyword_retriever.retrieve(
+                    keywords=retrieval_query.keywords,
+                    tenant_id=request.tenant_id,
+                    knowledge_base_id=request.knowledge_base_id,
+                    top_k=keyword_top_k,
+                ),
+            )
+
+            # 提取两路结果、异常和独立耗时。
+            vector_candidates = vector_result.candidates
+            keyword_candidates = keyword_result.candidates
+            vector_error = vector_result.error
+            keyword_error = keyword_result.error
+            timings.vector_millis = vector_result.elapsed_millis
+            timings.keyword_millis = keyword_result.elapsed_millis
+
+        elif request.mode == RetrievalMode.VECTOR:
             started = perf_counter()
 
             try:
-                vector_candidates = (
-                    self._vector_retriever.retrieve(
-                        question=retrieval_query.semantic_query,
-                        tenant_id=request.tenant_id,
-                        knowledge_base_id=(
-                            request.knowledge_base_id
-                        ),
-                        top_k=vector_top_k,
-                    )
+                vector_candidates = self._vector_retriever.retrieve(
+                    question=retrieval_query.semantic_query,
+                    tenant_id=request.tenant_id,
+                    knowledge_base_id=request.knowledge_base_id,
+                    top_k=vector_top_k,
                 )
             except Exception as exception:
                 vector_error = exception
             finally:
-                timings.vector_millis = (
-                    self._elapsed_millis(started)
-                )
+                timings.vector_millis = self._elapsed_millis(started)
 
-        # 3. 根据检索模式决定是否执行关键词检索。
-        if request.mode in (
-                RetrievalMode.KEYWORD,
-                RetrievalMode.HYBRID,
-        ):
+        else:
             started = perf_counter()
 
             try:
-                keyword_candidates = (
-                    self._keyword_retriever.retrieve(
-                        keywords=retrieval_query.keywords,
-                        tenant_id=request.tenant_id,
-                        knowledge_base_id=(
-                            request.knowledge_base_id
-                        ),
-                        top_k=keyword_top_k,
-                    )
+                keyword_candidates = self._keyword_retriever.retrieve(
+                    keywords=retrieval_query.keywords,
+                    tenant_id=request.tenant_id,
+                    knowledge_base_id=request.knowledge_base_id,
+                    top_k=keyword_top_k,
                 )
             except Exception as exception:
                 keyword_error = exception
             finally:
-                timings.keyword_millis = (
-                    self._elapsed_millis(started)
-                )
+                timings.keyword_millis = self._elapsed_millis(started)
 
         # 校验检索异常并处理混合检索降级。
         degraded = self._handle_retrieval_errors(
