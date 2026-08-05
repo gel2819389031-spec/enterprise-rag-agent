@@ -1,6 +1,7 @@
 """CRUD-RAG V1 可控测评数据准备器。"""
 
 import hashlib
+import heapq
 import json
 import random
 import re
@@ -24,12 +25,14 @@ class CrudDatasetPreparer:
         output_dir: Path,
         case_count: int = 50,
         negative_count: int = 450,
+        hard_negative_per_case: int = 0,
         random_seed: int = 20260805,
     ) -> None:
         self._crud_root = crud_root.resolve()
         self._output_dir = output_dir.resolve()
         self._case_count = case_count
         self._negative_count = negative_count
+        self._hard_negative_per_case = hard_negative_per_case
         self._random_seed = random_seed
         self._random = random.Random(random_seed)
 
@@ -86,10 +89,23 @@ class CrudDatasetPreparer:
             )
             gold_contents.add(self._normalize_text(content))
 
-        # 从官方86,834篇语料中流式抽取干扰文档。
-        negative_sources = self._sample_negative_documents(
-            excluded_contents=gold_contents
+        # V2 优先选择与问题相似的错误文档，再用随机文档补齐数量。
+        hard_negative_sources = self._sample_hard_negative_documents(
+            cases=cases,
+            excluded_contents=gold_contents,
         )
+        hard_negative_contents = {
+            self._normalize_text(content)
+            for _, _, content in hard_negative_sources
+        }
+        random_negative_sources = self._sample_negative_documents(
+            excluded_contents=gold_contents | hard_negative_contents,
+            target_count=max(
+                0,
+                self._negative_count - len(hard_negative_sources),
+            ),
+        )
+        negative_sources = hard_negative_sources + random_negative_sources
 
         for sequence, (source_part, source_line, content) in enumerate(
             negative_sources,
@@ -115,6 +131,7 @@ class CrudDatasetPreparer:
             case_count=len(cases),
             gold_document_count=len(cases),
             negative_document_count=len(negative_sources),
+            hard_negative_document_count=len(hard_negative_sources),
             total_document_count=len(documents),
         )
 
@@ -160,8 +177,17 @@ class CrudDatasetPreparer:
     def _sample_negative_documents(
         self,
         excluded_contents: set[str],
+        target_count: int | None = None,
     ) -> list[tuple[str, int, str]]:
         """使用蓄水池算法抽取干扰文档，避免加载全部语料。"""
+        expected_count = (
+            self._negative_count
+            if target_count is None
+            else target_count
+        )
+        if expected_count == 0:
+            return []
+
         reservoir: list[tuple[str, int, str]] = []
         eligible_count = 0
 
@@ -174,21 +200,76 @@ class CrudDatasetPreparer:
             eligible_count += 1
             candidate = (source_part, source_line, content)
 
-            if len(reservoir) < self._negative_count:
+            if len(reservoir) < expected_count:
                 reservoir.append(candidate)
                 continue
 
             replace_index = self._random.randrange(eligible_count)
-            if replace_index < self._negative_count:
+            if replace_index < expected_count:
                 reservoir[replace_index] = candidate
 
-        if len(reservoir) != self._negative_count:
+        if len(reservoir) != expected_count:
             raise ValueError(
                 "Not enough negative documents: "
-                f"expected={self._negative_count}, "
+                f"expected={expected_count}, "
                 f"actual={len(reservoir)}"
             )
         return reservoir
+
+    def _sample_hard_negative_documents(
+        self,
+        cases: list[EvaluationCase],
+        excluded_contents: set[str],
+    ) -> list[tuple[str, int, str]]:
+        """按字符二元组相似度为每个问题选择难负样本文档。"""
+        if self._hard_negative_per_case <= 0:
+            return []
+
+        question_grams = [
+            self._character_grams(case.question)
+            for case in cases
+        ]
+        heaps: list[list[tuple[float, str, int, str]]] = [
+            [] for _ in cases
+        ]
+
+        for source_part, source_line, content in self._iter_corpus():
+            normalized = self._normalize_text(content)
+            if not normalized or normalized in excluded_contents:
+                continue
+
+            document_grams = self._character_grams(normalized)
+            for index, query_grams in enumerate(question_grams):
+                if not query_grams:
+                    continue
+                score = len(query_grams & document_grams) / len(query_grams)
+                if score <= 0:
+                    continue
+
+                entry = (score, source_part, source_line, content)
+                heap = heaps[index]
+                if len(heap) < self._hard_negative_per_case:
+                    heapq.heappush(heap, entry)
+                elif score > heap[0][0]:
+                    heapq.heapreplace(heap, entry)
+
+        # 同一篇文档可能对多个问题都是难负样本，只生成一份文件。
+        selected: list[tuple[str, int, str]] = []
+        seen: set[str] = set()
+        ranked_entries = sorted(
+            (entry for heap in heaps for entry in heap),
+            key=lambda entry: entry[0],
+            reverse=True,
+        )
+        for _, source_part, source_line, content in ranked_entries:
+            normalized = self._normalize_text(content)
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            selected.append((source_part, source_line, content))
+            if len(selected) >= self._negative_count:
+                break
+        return selected
 
     def _iter_corpus(self) -> Iterable[tuple[str, int, str]]:
         """逐行读取正常语料，不读取 documents_hallu 文件。"""
@@ -275,6 +356,15 @@ class CrudDatasetPreparer:
     def _normalize_text(text: str) -> str:
         """去除空白，用于排除重复文档。"""
         return re.sub(r"\s+", "", text)
+
+    @classmethod
+    def _character_grams(cls, text: str) -> set[str]:
+        """提取字符二元组，用于无分词依赖的中文文本相似度排序。"""
+        normalized = cls._normalize_text(text).lower()
+        return {
+            normalized[index:index + 2]
+            for index in range(max(0, len(normalized) - 1))
+        }
 
     @staticmethod
     def _natural_sort_key(value: str) -> list[int | str]:

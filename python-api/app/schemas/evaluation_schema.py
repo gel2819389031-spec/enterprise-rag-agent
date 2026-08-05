@@ -19,6 +19,8 @@ class EvaluationExperiment(str, Enum):
     KEYWORD = "KEYWORD"
     HYBRID = "HYBRID"
     HYBRID_RERANK = "HYBRID_RERANK"
+    HYBRID_REWRITE = "HYBRID_REWRITE"
+    HYBRID_REWRITE_RERANK = "HYBRID_REWRITE_RERANK"
 
 
 class EvaluationCreateRequest(CamelModel):

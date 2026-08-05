@@ -22,6 +22,7 @@ from app.resolver.conversation_query_resolver import (
     ConversationQueryResolver,
 )
 from app.retriever.hybrid_retriever import HybridRetriever
+from app.retriever.keyword_extractor import KeywordExtractor
 from app.rewriter.retrieval_query_rewriter import (
     RetrievalQueryRewriter,
 )
@@ -77,6 +78,7 @@ class ChatService:
 
     def __init__(self) -> None:
         """初始化聊天流程依赖。"""
+        self._keyword_extractor = KeywordExtractor()
         self._settings = get_settings()
 
         # 复用同一个 LangChain 聊天模型。
@@ -97,7 +99,7 @@ class ChatService:
 
         # 将独立问题改写为检索查询。
         self._retrieval_query_rewriter = (
-            RetrievalQueryRewriter(chat_model)
+            RetrievalQueryRewriter(chat_model,self._keyword_extractor)
         )
 
         # 执行向量检索、关键词检索和 RRF 融合。
@@ -117,6 +119,7 @@ class ChatService:
 
         # 将流式事件编码为 SSE 文本。
         self._sse_encoder = SseEncoder()
+
 
     def answer(self, request: ChatRequest) -> ChatData:
         """执行同步聊天流程。"""

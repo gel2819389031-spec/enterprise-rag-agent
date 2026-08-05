@@ -31,6 +31,12 @@ class EvaluationCase(BaseModel):
         description="回答该问题所需的金标准文档标识。",
     )
 
+    # 可选的答案证据文本。只有数据集明确标注证据时，才计算分块级指标。
+    gold_evidence_texts: list[str] = Field(
+        default_factory=list,
+        description="能够直接支持标准答案的原文片段。",
+    )
+
     dataset: str = Field(default="CRUD-RAG")
     task_type: EvaluationTaskType = Field(
         default=EvaluationTaskType.QUESTANSWER_1DOC
@@ -75,4 +81,5 @@ class PreparedDatasetSummary(BaseModel):
     case_count: int = Field(..., ge=1)
     gold_document_count: int = Field(..., ge=1)
     negative_document_count: int = Field(..., ge=0)
+    hard_negative_document_count: int = Field(default=0, ge=0)
     total_document_count: int = Field(..., ge=1)

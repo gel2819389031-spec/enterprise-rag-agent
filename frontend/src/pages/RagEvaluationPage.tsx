@@ -7,6 +7,7 @@ import {
   Button,
   Card,
   Checkbox,
+  Descriptions,
   Form,
   Progress,
   Select,
@@ -14,12 +15,14 @@ import {
   Table,
   Tabs,
   Tag,
+  Typography,
 } from 'antd';
 import { evaluationApi } from '../api/evaluation';
 import { kbApi } from '../api/modules';
 import { PageHeader } from '../components/PageHeader';
 import type {
   EvaluationCreateRequest,
+  EvaluationCandidate,
   EvaluationDetail,
   EvaluationSummary,
 } from '../types/evaluation';
@@ -27,13 +30,16 @@ import { RetrievalDebugPage } from './RetrievalDebugPage';
 
 
 const experimentOptions = [
-  { label: '向量检索', value: 'VECTOR' },
-  { label: '关键词检索', value: 'KEYWORD' },
-  { label: '混合检索', value: 'HYBRID' },
-  { label: '混合检索 + Rerank', value: 'HYBRID_RERANK' },
+  { label: '向量检索（无重写）', value: 'VECTOR' },
+  { label: '关键词检索（无重写）', value: 'KEYWORD' },
+  { label: '混合检索（无重写）', value: 'HYBRID' },
+  { label: '混合检索 + Rerank（无重写）', value: 'HYBRID_RERANK' },
+  { label: '混合检索 + Rewrite', value: 'HYBRID_REWRITE' },
+  { label: '混合检索 + Rewrite + Rerank', value: 'HYBRID_REWRITE_RERANK' },
 ];
 
 const percentage = (value: number) => `${(value * 100).toFixed(1)}%`;
+const optionalPercentage = (value: number | null) => value === null ? '-' : percentage(value);
 
 /** RAG 测评总页面，内部保留单问题检索调试。 */
 export function RagEvaluationPage() {
@@ -66,6 +72,7 @@ function EvaluationPanel() {
   const { message } = App.useApp();
   const [form] = Form.useForm<EvaluationCreateRequest>();
   const [runId, setRunId] = useState<string>();
+  const datasetCode = Form.useWatch('datasetCode', form);
 
   const knowledgeBases = useQuery({
     queryKey: ['kb', 'rag-evaluation'],
@@ -133,7 +140,10 @@ function EvaluationPanel() {
             </Form.Item>
             <Form.Item name="datasetCode" label="评测数据集" style={{ width: 220 }}>
               <Select
-                options={[{ value: 'CRUD_RAG_V1', label: 'CRUD-RAG V1（单文档问答）' }]}
+                options={[
+                  { value: 'CRUD_RAG_V1', label: 'CRUD-RAG V1（随机负样本）' },
+                  { value: 'CRUD_RAG_V2', label: 'CRUD-RAG V2（Hard Negative）' },
+                ]}
               />
             </Form.Item>
           </Space>
@@ -145,6 +155,16 @@ function EvaluationPanel() {
           >
             <Checkbox.Group options={experimentOptions} />
           </Form.Item>
+
+          {datasetCode === 'CRUD_RAG_V2' && (
+            <Alert
+              type="warning"
+              showIcon
+              message="V2 必须配套使用已导入 crud_v2/documents 全部 1000 篇文档的独立知识库"
+              description="选择原 V1 知识库不会包含 Hard Negative，测评结果仍可能保持不变。"
+              style={{ marginBottom: 16 }}
+            />
+          )}
 
           <Button
             type="primary"
@@ -192,11 +212,16 @@ function EvaluationPanel() {
               dataSource={resultQuery.data.summaries}
               columns={[
                 { title: '实验', dataIndex: 'experiment' },
-                { title: 'Hit@1', dataIndex: 'hitAt1', render: percentage },
-                { title: 'Hit@3', dataIndex: 'hitAt3', render: percentage },
-                { title: 'Hit@5', dataIndex: 'hitAt5', render: percentage },
-                { title: 'Hit@8', dataIndex: 'hitAt8', render: percentage },
-                { title: 'MRR', dataIndex: 'mrr', render: (v) => Number(v).toFixed(4) },
+                { title: '文档 Hit@1', dataIndex: 'hitAt1', render: percentage },
+                { title: '文档 Hit@3', dataIndex: 'hitAt3', render: percentage },
+                { title: '文档 Hit@5', dataIndex: 'hitAt5', render: percentage },
+                { title: '文档 Hit@8', dataIndex: 'hitAt8', render: percentage },
+                { title: '文档 MRR', dataIndex: 'mrr', render: (v) => Number(v).toFixed(4) },
+                {
+                  title: '证据分块 Hit@5',
+                  dataIndex: 'chunkHitAt5',
+                  render: optionalPercentage,
+                },
                 {
                   title: '平均耗时',
                   dataIndex: 'averageLatencyMillis',
@@ -217,18 +242,21 @@ function EvaluationPanel() {
               rowKey={(item) => `${item.experiment}-${item.caseId}`}
               dataSource={resultQuery.data.details}
               pagination={{ pageSize: 10 }}
+              expandable={{
+                expandedRowRender: (item) => <CaseDiagnosis detail={item} />,
+              }}
               columns={[
                 { title: '实验', dataIndex: 'experiment', width: 150 },
                 { title: '问题', dataIndex: 'question', ellipsis: true },
                 {
-                  title: 'Hit@5',
+                  title: '文档 Hit@5',
                   dataIndex: 'hitAt5',
                   width: 90,
                   render: (value) => (
                     <Tag color={value ? 'success' : 'error'}>{value ? '命中' : '未命中'}</Tag>
                   ),
                 },
-                { title: '首个相关排名', dataIndex: 'firstRelevantRank', width: 120 },
+                { title: '首个相关文档排名', dataIndex: 'firstRelevantRank', width: 145 },
                 {
                   title: '耗时',
                   dataIndex: 'latencyMillis',
@@ -248,4 +276,56 @@ function EvaluationPanel() {
       )}
     </Space>
   );
+}
+
+/** 展示一次检索的真实查询和候选分块，避免只看汇总指标。 */
+function CaseDiagnosis({ detail }: { detail: EvaluationDetail }) {
+  return (
+    <Space direction="vertical" size={12} style={{ width: '100%' }}>
+      <Descriptions size="small" column={1} bordered>
+        <Descriptions.Item label="语义查询">
+          {detail.semanticQuery}
+        </Descriptions.Item>
+        <Descriptions.Item label="查询改写">
+          {detail.rewriteApplied ? '已启用' : '未启用'}
+        </Descriptions.Item>
+        <Descriptions.Item label="关键词">
+          <Space size={[4, 4]} wrap>
+            {detail.keywords.length > 0
+              ? detail.keywords.map((keyword) => <Tag key={keyword}>{keyword}</Tag>)
+              : '-'}
+          </Space>
+        </Descriptions.Item>
+        <Descriptions.Item label="正确文档">
+          {detail.goldDocumentNames.join('、')}
+        </Descriptions.Item>
+        <Descriptions.Item label="证据分块指标">
+          {detail.evidenceEvaluated
+            ? `首个相关分块排名：${detail.firstRelevantChunkRank ?? '未命中'}`
+            : '当前数据集没有人工证据标注，暂不计算'}
+        </Descriptions.Item>
+      </Descriptions>
+
+      <Typography.Text strong>Top 8 实际召回分块</Typography.Text>
+      <Table<EvaluationCandidate>
+        size="small"
+        rowKey={(item) => `${item.chunkId}`}
+        pagination={false}
+        dataSource={detail.retrievedCandidates}
+        columns={[
+          { title: '文档', dataIndex: 'documentName', width: 240, ellipsis: true },
+          { title: '分块', dataIndex: 'chunkIndex', width: 70 },
+          { title: '向量分', dataIndex: 'vectorScore', width: 90, render: score },
+          { title: '关键词分', dataIndex: 'keywordScore', width: 90, render: score },
+          { title: '融合分', dataIndex: 'fusionScore', width: 90, render: score },
+          { title: '重排分', dataIndex: 'rerankScore', width: 90, render: score },
+          { title: '内容', dataIndex: 'content', ellipsis: true },
+        ]}
+      />
+    </Space>
+  );
+}
+
+function score(value: number | null) {
+  return value === null ? '-' : Number(value).toFixed(4);
 }

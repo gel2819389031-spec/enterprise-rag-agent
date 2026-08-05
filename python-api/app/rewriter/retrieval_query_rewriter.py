@@ -4,13 +4,15 @@ import re
 
 from langchain_core.prompts import ChatPromptTemplate
 
+from app.retriever.keyword_extractor import KeywordExtractor
 from app.schemas.routing_schema import RetrievalQuery
 
 logger = logging.getLogger(__name__)
 class RetrievalQueryRewriter:
     """面向向量检索的查询改写器。"""
 
-    def __init__(self, chat_model) -> None:
+    def __init__(self, chat_model,keyword_extractor: KeywordExtractor,) -> None:
+        self._keyword_extractor = keyword_extractor
         """接收统一创建的 LangChain ChatModel。"""
         self._prompt = ChatPromptTemplate.from_messages(
             [
@@ -138,8 +140,16 @@ class RetrievalQueryRewriter:
             # 调用模型生成结构化检索查询。
             result  = self._chain.invoke({"query": normalized_query})
             # 清理模型返回的重复关键词和空关键词。
-            print(result)
-            keywords = self._normalize_keywords(result.keywords)
+            # 使用统一提取器清理模型返回的关键词。
+            # 使用统一提取器清理模型返回的关键词。
+            keywords = self._keyword_extractor.normalize(
+                result.keywords
+            )
+            # 模型没有生成有效关键词时，降级使用 jieba。
+            if not keywords:
+                keywords = self._keyword_extractor.extract(
+                    normalized_query
+                )
             return RetrievalQuery(
                 semantic_query=result.semantic_query.strip() or normalized_query,
                 keywords=keywords,
@@ -148,42 +158,8 @@ class RetrievalQueryRewriter:
             # 模型调用失败时使用简单规则提取关键词。
             return RetrievalQuery(
                 semantic_query=normalized_query,
-                keywords=self._fallback_keywords(normalized_query),
+                keywords=self._keyword_extractor.extract(
+                    normalized_query
+                ),
                 alternative_queries=[],
             )
-
-    @staticmethod
-    def _normalize_keywords(keywords: list[str]) -> list[str]:
-        """清理空值、重复值和过短关键词。"""
-        normalized: list[str] = []
-        seen: set[str] = set()
-
-        for keyword in keywords:
-            value = keyword.strip()
-
-            # 单字符中文词通常检索噪声较大，暂时跳过。
-            if len(value) < 2:
-                continue
-
-            if value in seen:
-                continue
-
-            seen.add(value)
-            normalized.append(value)
-
-            # 第一版最多保留 6 个关键词。
-            if len(normalized) >= 6:
-                break
-
-        return normalized
-
-    @staticmethod
-    def _fallback_keywords(query: str) -> list[str]:
-        """模型失败时按标点和空白切分问题。"""
-        values = re.split(r"[\s，。！？、；：,.!?;:]+", query)
-
-        return [
-                   value.strip()
-                   for value in values
-                   if len(value.strip()) >= 2
-               ][:6]

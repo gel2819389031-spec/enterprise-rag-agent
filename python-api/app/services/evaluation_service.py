@@ -22,11 +22,27 @@ from app.schemas.retrieval_debug_schema import RetrievalDebugRequest, RetrievalM
 from app.services.retrieval_debug_service import RetrievalDebugService
 
 
+# 每个实验显式声明检索模式、是否重写、是否重排和读取的结果阶段。
+# 基础四组实验统一关闭 Rewrite，避免模型改写掩盖检索算法之间的差异。
 EXPERIMENT_CONFIG = {
-    EvaluationExperiment.VECTOR: (RetrievalMode.VECTOR, False, "vector_results"),
-    EvaluationExperiment.KEYWORD: (RetrievalMode.KEYWORD, False, "keyword_results"),
-    EvaluationExperiment.HYBRID: (RetrievalMode.HYBRID, False, "fusion_results"),
-    EvaluationExperiment.HYBRID_RERANK: (RetrievalMode.HYBRID, True, "rerank_results"),
+    EvaluationExperiment.VECTOR: (
+        RetrievalMode.VECTOR, False, False, "vector_results"
+    ),
+    EvaluationExperiment.KEYWORD: (
+        RetrievalMode.KEYWORD, False, False, "keyword_results"
+    ),
+    EvaluationExperiment.HYBRID: (
+        RetrievalMode.HYBRID, False, False, "fusion_results"
+    ),
+    EvaluationExperiment.HYBRID_RERANK: (
+        RetrievalMode.HYBRID, False, True, "rerank_results"
+    ),
+    EvaluationExperiment.HYBRID_REWRITE: (
+        RetrievalMode.HYBRID, True, False, "fusion_results"
+    ),
+    EvaluationExperiment.HYBRID_REWRITE_RERANK: (
+        RetrievalMode.HYBRID, True, True, "rerank_results"
+    ),
 }
 
 
@@ -148,7 +164,9 @@ class EvaluationService:
         document_mapping: dict[str, str],
     ) -> dict[str, Any]:
         """执行一条 Case，失败时按未命中计分。"""
-        mode, enable_rerank, result_field = EXPERIMENT_CONFIG[experiment]
+        mode, enable_rewrite, enable_rerank, result_field = (
+            EXPERIMENT_CONFIG[experiment]
+        )
         gold_names = {document_mapping[key] for key in case.gold_document_keys}
         started = perf_counter()
 
@@ -160,7 +178,7 @@ class EvaluationService:
                     knowledge_base_id=request.knowledge_base_id,
                     question=case.question,
                     mode=mode,
-                    enable_rewrite=True,
+                    enable_rewrite=enable_rewrite,
                     enable_rerank=enable_rerank,
                     vector_top_k=30,
                     keyword_top_k=30,
@@ -170,20 +188,42 @@ class EvaluationService:
                 )
             )
             candidates = getattr(data, result_field)
-            names = [item.document_name for item in candidates if item.document_name]
+            # 文档级指标先按 document_id 去重，避免同一文档多个分块挤占 TopK。
+            unique_documents = self._unique_documents(candidates)
+            names = [
+                item.document_name
+                for item in unique_documents
+                if item.document_name
+            ]
             first_rank = next(
-                (rank for rank, name in enumerate(names, start=1) if name in gold_names),
+                (
+                    rank
+                    for rank, name in enumerate(names, start=1)
+                    if name in gold_names
+                ),
                 None,
+            )
+
+            # 没有人工证据标注时不生成虚假的分块命中指标。
+            evidence_rank = self._first_evidence_rank(
+                candidates,
+                case.gold_evidence_texts,
             )
             return self._detail(
                 case=case,
                 experiment=experiment.value,
                 gold_names=gold_names,
                 first_rank=first_rank,
+                evidence_rank=evidence_rank,
                 latency=self._elapsed(started),
                 degraded=data.degraded,
                 error=None,
                 retrieved_names=names[:8],
+                retrieved_candidates=self._candidate_details(candidates[:8]),
+                semantic_query=data.semantic_query,
+                keywords=data.keywords,
+                rewrite_applied=data.rewrite_applied,
+                rerank_applied=data.rerank_applied,
             )
         except Exception as exception:
             return self._detail(
@@ -191,10 +231,16 @@ class EvaluationService:
                 experiment=experiment.value,
                 gold_names=gold_names,
                 first_rank=None,
+                evidence_rank=None,
                 latency=self._elapsed(started),
                 degraded=False,
                 error=str(exception),
                 retrieved_names=[],
+                retrieved_candidates=[],
+                semantic_query=case.question,
+                keywords=[],
+                rewrite_applied=enable_rewrite,
+                rerank_applied=False,
             )
 
     @staticmethod
@@ -203,10 +249,16 @@ class EvaluationService:
         experiment: str,
         gold_names: set[str],
         first_rank: int | None,
+        evidence_rank: int | None,
         latency: int,
         degraded: bool,
         error: str | None,
         retrieved_names: list[str],
+        retrieved_candidates: list[dict[str, Any]],
+        semantic_query: str,
+        keywords: list[str],
+        rewrite_applied: bool,
+        rerank_applied: bool,
     ) -> dict[str, Any]:
         return {
             "caseId": case.case_id,
@@ -214,22 +266,92 @@ class EvaluationService:
             "question": case.question,
             "goldDocumentNames": sorted(gold_names),
             "retrievedDocumentNames": retrieved_names,
+            "retrievedCandidates": retrieved_candidates,
+            "semanticQuery": semantic_query,
+            "keywords": keywords,
+            "rewriteApplied": rewrite_applied,
+            "rerankApplied": rerank_applied,
             "firstRelevantRank": first_rank,
             "hitAt1": first_rank is not None and first_rank <= 1,
             "hitAt3": first_rank is not None and first_rank <= 3,
             "hitAt5": first_rank is not None and first_rank <= 5,
             "hitAt8": first_rank is not None and first_rank <= 8,
             "reciprocalRank": 1.0 / first_rank if first_rank else 0.0,
+            "evidenceEvaluated": bool(case.gold_evidence_texts),
+            "firstRelevantChunkRank": evidence_rank,
+            "chunkHitAt5": (
+                evidence_rank is not None and evidence_rank <= 5
+                if case.gold_evidence_texts
+                else None
+            ),
             "latencyMillis": latency,
             "degraded": degraded,
             "error": error,
         }
 
     @staticmethod
+    def _unique_documents(candidates: list[Any]) -> list[Any]:
+        """按文档去重并保留每篇文档首次出现的排名。"""
+        unique: list[Any] = []
+        seen: set[object] = set()
+
+        for candidate in candidates:
+            identity: object = candidate.document_id
+            if identity is None:
+                identity = candidate.document_name
+            if identity in seen:
+                continue
+            seen.add(identity)
+            unique.append(candidate)
+
+        return unique
+
+    @staticmethod
+    def _first_evidence_rank(
+        candidates: list[Any],
+        evidence_texts: list[str],
+    ) -> int | None:
+        """返回首个包含人工证据文本的分块排名。"""
+        normalized_evidence = [
+            "".join(text.split())
+            for text in evidence_texts
+            if text and text.strip()
+        ]
+        if not normalized_evidence:
+            return None
+
+        for rank, candidate in enumerate(candidates, start=1):
+            content = "".join(candidate.content.split())
+            if any(evidence in content for evidence in normalized_evidence):
+                return rank
+        return None
+
+    @staticmethod
+    def _candidate_details(candidates: list[Any]) -> list[dict[str, Any]]:
+        """保留前端诊断检索差异所需的候选分块信息。"""
+        return [
+            {
+                "documentId": item.document_id,
+                "documentName": item.document_name,
+                "chunkId": item.chunk_id,
+                "chunkIndex": item.chunk_index,
+                "vectorScore": item.vector_score,
+                "keywordScore": item.keyword_score,
+                "fusionScore": item.fusion_score,
+                "rerankScore": item.rerank_score,
+                "content": item.content,
+            }
+            for item in candidates
+        ]
+
+    @staticmethod
     def _summarize(experiment: str, details: list[dict[str, Any]]) -> dict[str, Any]:
         total = len(details)
         latencies = sorted(item["latencyMillis"] for item in details)
         p95_index = max(0, math.ceil(len(latencies) * 0.95) - 1)
+        evidence_details = [
+            item for item in details if item["evidenceEvaluated"]
+        ]
 
         def rate(field_name: str) -> float:
             return sum(bool(item[field_name]) for item in details) / total if total else 0.0
@@ -244,13 +366,25 @@ class EvaluationService:
             "hitAt5": rate("hitAt5"),
             "hitAt8": rate("hitAt8"),
             "mrr": sum(item["reciprocalRank"] for item in details) / total if total else 0.0,
+            "evidenceCaseCount": len(evidence_details),
+            "chunkHitAt5": (
+                sum(bool(item["chunkHitAt5"]) for item in evidence_details)
+                / len(evidence_details)
+                if evidence_details
+                else None
+            ),
             "averageLatencyMillis": sum(latencies) / len(latencies) if latencies else 0.0,
             "p95LatencyMillis": latencies[p95_index] if latencies else 0,
         }
 
     def _resolve_dataset(self, dataset_code: str) -> Path:
         datasets = {
-            "CRUD_RAG_V1": self._python_root / "evaluation" / "datasets" / "crud_v1"
+            "CRUD_RAG_V1": (
+                self._python_root / "evaluation" / "datasets" / "crud_v1"
+            ),
+            "CRUD_RAG_V2": (
+                self._python_root / "evaluation" / "datasets" / "crud_v2"
+            ),
         }
         path = datasets.get(dataset_code)
         if path is None or not path.is_dir():

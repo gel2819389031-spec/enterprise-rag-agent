@@ -21,7 +21,12 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class EvaluationServiceImpl implements EvaluationService {
     private static final Set<String> SUPPORTED_EXPERIMENTS = Set.of(
-            "VECTOR", "KEYWORD", "HYBRID", "HYBRID_RERANK"
+            "VECTOR",
+            "KEYWORD",
+            "HYBRID",
+            "HYBRID_RERANK",
+            "HYBRID_REWRITE",
+            "HYBRID_REWRITE_RERANK"
     );
 
     private final PythonEvaluationClient pythonClient;
@@ -66,7 +71,8 @@ public class EvaluationServiceImpl implements EvaluationService {
         if (request == null || request.getKnowledgeBaseId() == null) {
             throw new ClientException(BaseErrorCode.BAD_REQUEST, "知识库 ID 不能为空");
         }
-        if (!"CRUD_RAG_V1".equals(request.getDatasetCode())) {
+        if (!Set.of("CRUD_RAG_V1", "CRUD_RAG_V2")
+                .contains(request.getDatasetCode())) {
             throw new ClientException(BaseErrorCode.BAD_REQUEST, "暂不支持该评测数据集");
         }
         if (request.getExperiments() == null

@@ -10,6 +10,7 @@ from langchain_core.documents import Document
 from app.config import get_settings
 from app.context.context_packer import ContextPacker
 from app.factories.chat_model_factory import get_chat_model
+from app.retriever.keyword_extractor import KeywordExtractor
 from app.retriever.keyword_retriever import KeywordRetriever
 from app.retriever.pgvector_retriever import PgVectorRetriever
 from app.retriever.rrf_fusion import RrfFusion
@@ -31,7 +32,13 @@ class RetrievalDebugService:
 
     def __init__(self) -> None:
         self._settings = get_settings()
-        self._rewriter = RetrievalQueryRewriter(get_chat_model())
+        # 创建统一的本地关键词提取器。
+        self._keyword_extractor = KeywordExtractor()
+        # 查询重写器和无 Rewrite 链路共用关键词清理规则。
+        self._rewriter = RetrievalQueryRewriter(
+            get_chat_model(),
+            self._keyword_extractor,
+        )
         self._vector_retriever = PgVectorRetriever()
         self._keyword_retriever = KeywordRetriever()
         self._rerank_service = RerankService()
@@ -271,19 +278,10 @@ class RetrievalDebugService:
         """执行模型查询改写，或使用本地规则提取关键词。"""
         if enabled:
             return self._rewriter.rewrite(question)
-
-        keywords = [
-            value.strip()
-            for value in re.split(
-                r"[\s，。！？、；：,.!?;:]+",
-                question,
-            )
-            if len(value.strip()) >= 2
-        ][:6]
-
+        # 关闭 Rewrite 时不调用模型，直接使用原问题和本地关键词。
         return RetrievalQuery(
             semantic_query=question,
-            keywords=keywords,
+            keywords=self._keyword_extractor.extract(question),
             alternative_queries=[],
         )
 

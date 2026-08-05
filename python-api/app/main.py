@@ -19,8 +19,23 @@ from app.api.retrieval_debug_api import (
     router as retrieval_debug_router,
 )
 from app.api.evaluation_api import router as evaluation_router
+from contextlib import asynccontextmanager
 
+from app.db.postgres import (
+    close_connection_pool,
+    init_connection_pool,
+)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """管理数据库连接池的启动和关闭。"""
+    # 应用启动时创建并预热连接。
+    init_connection_pool()
 
+    try:
+        yield
+    finally:
+        # 应用停止时释放物理数据库连接。
+        close_connection_pool()
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application.
 
@@ -36,6 +51,7 @@ def create_app() -> FastAPI:
         title=settings.app_name,
         version="0.1.0",
         description="Python model and RAG orchestration API for the enterprise RAG project.",
+        lifespan=lifespan,
     )
 
     # 注册 API 路由。

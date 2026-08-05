@@ -78,7 +78,14 @@ class Settings:
 
     # 是否将检索分数写进 LLM 上下文。
     rag_context_include_scores: bool
+
+    # PostgreSQL 连接池配置。
+    postgres_pool_min_size: int
+    postgres_pool_max_size: int
+    postgres_pool_timeout_seconds: int
+    postgres_connect_timeout_seconds: int
     java_api_base_url: str
+
 
 
 
@@ -184,6 +191,18 @@ def get_settings() -> Settings:
                     "false",
                 ).lower()
                 == "true"
+        ),
+        postgres_pool_min_size=int(
+            os.getenv("POSTGRES_POOL_MIN_SIZE", "2")
+        ),
+        postgres_pool_max_size=int(
+            os.getenv("POSTGRES_POOL_MAX_SIZE", "10")
+        ),
+        postgres_pool_timeout_seconds=int(
+            os.getenv("POSTGRES_POOL_TIMEOUT_SECONDS", "10")
+        ),
+        postgres_connect_timeout_seconds=int(
+            os.getenv("POSTGRES_CONNECT_TIMEOUT_SECONDS", "10")
         ),
         java_api_base_url=os.getenv("JAVA_API_BASE_URL", "http://localhost:8123"),
     )
