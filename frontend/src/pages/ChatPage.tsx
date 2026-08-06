@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, App, Button, Empty, Input, List, Popconfirm, Select, Spin, Tag, Typography } from 'antd';
 import { DeleteOutlined, PlusOutlined, SendOutlined, StopOutlined } from '@ant-design/icons';
-import { chatApi, kbApi, streamChat } from '../api/modules';
+import { chatApi, streamChat } from '../api/modules';
 import type { ChatMessage } from '../types/api';
 interface LiveMessage {
   role: 'USER' | 'ASSISTANT';
@@ -25,8 +25,8 @@ export function ChatPage() {
       queryFn: () => chatApi.conversations({ pageNo: convPage, pageSize: 50 }),
     }),
     kbs = useQuery({
-      queryKey: ['kb', 'chat'],
-      queryFn: () => kbApi.page({ pageNo: 1, pageSize: 100 }),
+      queryKey: ['chat', 'knowledge-bases'],
+      queryFn: chatApi.availableKnowledgeBases,
     }),
     messages = useQuery({
       queryKey: ['messages', conversationId],
@@ -161,7 +161,7 @@ export function ChatPage() {
             placeholder="选择知识库"
             value={knowledgeBaseId}
             onChange={setKnowledgeBaseId}
-            options={kbs.data?.records.map((k) => ({ value: k.id, label: k.name }))}
+            options={kbs.data?.map((k) => ({ value: k.id, label: k.name }))}
             style={{ width: 260 }}
           />
           <Tag color="blue">RAG 模式</Tag>

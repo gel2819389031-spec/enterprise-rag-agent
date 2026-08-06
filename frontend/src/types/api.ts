@@ -33,6 +33,12 @@ export interface CurrentUser {
   roleCode: string;
 }
 
+/** RAG 对话中可选择的轻量知识库信息。 */
+export interface ChatKnowledgeBaseOption {
+  id: string;
+  name: string;
+}
+
 // --- 枚举类型 ---
 
 export type KnowledgeBaseVisibility = 'PRIVATE' | 'TENANT' | 'PUBLIC';
@@ -197,4 +203,70 @@ export interface ChatRequest {
   knowledgeBaseId?: string;
   question: string;
   model?: string;
+}
+
+// --- Trace 类型 ---
+
+export type TraceStatus = 'RUNNING' | 'SUCCESS' | 'DEGRADED' | 'FAILED';
+
+export interface RagTraceListItem {
+  id: string;
+  conversationId: string;
+  status: TraceStatus;
+  latencyMs: number | null;
+  question: string | null;
+  intent: string | null;
+  degraded: boolean;
+  createdAt: string;
+}
+
+export interface RagTraceDetail {
+  id: string;
+  tenantId: string;
+  conversationId: string;
+  messageId: string;
+  traceType: string;
+  requestId: string;
+  input: Record<string, unknown>;
+  output: Record<string, unknown>;
+  nodes: TraceNode[];
+  tokenUsage: { inputTokens: number; outputTokens: number; totalTokens: number };
+  degradedReasons: string[];
+  latencyMs: number | null;
+  status: TraceStatus;
+  errorMessage: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  parseError: boolean;
+}
+
+export interface TraceNode {
+  name: string;
+  status: string;
+  startedAt: string;
+  finishedAt: string | null;
+  latencyMs: number | null;
+  inputSummary: Record<string, unknown>;
+  outputSummary: Record<string, unknown>;
+  errorMessage: string | null;
+}
+
+export interface RagTraceStatistics {
+  totalCount: number;
+  successCount: number;
+  failedCount: number;
+  degradedCount: number;
+  successRate: number;
+  avgLatencyMs: number;
+  todayCount: number;
+}
+
+export interface RagTraceQuery {
+  status?: TraceStatus;
+  keyword?: string;
+  conversationId?: string;
+  pageNo: number;
+  pageSize: number;
 }

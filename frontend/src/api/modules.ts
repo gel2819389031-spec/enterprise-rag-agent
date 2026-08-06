@@ -4,6 +4,7 @@ import axios from 'axios';
 import type {
   ApiResult,
   ChatConversation,
+  ChatKnowledgeBaseOption,
   ChatMessage,
   ChatRequest,
   CurrentUser,
@@ -70,11 +71,20 @@ export const taskApi = {
   retry: (id: string) => http.post(`/api/ingestion/tasks/${id}/retry`),
 };
 export const chatApi = {
+  /** 所有登录用户都可查询，用于 RAG 对话的知识库选择。 */
+  availableKnowledgeBases: () =>
+    http.get<never, ChatKnowledgeBaseOption[]>('/api/chat/knowledge-bases'),
   conversations: (p: { keyword?: string; pageNo: number; pageSize: number }) =>
     http.get<never, PageResult<ChatConversation>>('/api/chat/conversations', { params: p }),
   messages: (id: string) =>
     http.get<never, ChatMessage[]>(`/api/chat/conversations/${id}/messages`),
   remove: (id: string) => http.delete(`/api/chat/conversations/${id}`),
+};
+export const traceApi = {
+  list: (params: { status?: string; keyword?: string; conversationId?: string; pageNo: number; pageSize: number }) =>
+    http.get<never, PageResult<import('../types/api').RagTraceListItem>>('/api/rag/traces', { params }),
+  get: (id: string) => http.get<never, import('../types/api').RagTraceDetail>(`/api/rag/traces/${id}`),
+  statistics: () => http.get<never, import('../types/api').RagTraceStatistics>('/api/rag/traces/statistics'),
 };
 export const streamChat = async (
   request: ChatRequest,

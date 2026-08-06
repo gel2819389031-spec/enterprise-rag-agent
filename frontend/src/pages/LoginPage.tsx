@@ -5,6 +5,7 @@ import { useMutation } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { authApi } from '../api/modules';
 import { useAuthStore } from '../stores/authStore';
+import { getDefaultPath } from '../utils/role';
 interface LoginValues {
   tenantCode: string;
   username: string;
@@ -14,7 +15,7 @@ interface LoginValues {
 export function LoginPage() {
   const nav = useNavigate(),
     { message } = App.useApp(),
-    { accessToken, setSession, clear } = useAuthStore();
+    { accessToken, setSession, setUser, clear } = useAuthStore();
   const [verifying, setVerifying] = useState(!!accessToken);
 
   // 页面挂载时验证已有 token 是否有效
@@ -26,8 +27,11 @@ export function LoginPage() {
     let cancelled = false;
     authApi
       .me()
-      .then(() => {
-        if (!cancelled) nav('/dashboard', { replace: true });
+      .then((user) => {
+        if (!cancelled) {
+          setUser(user);
+          nav(getDefaultPath(user), { replace: true });
+        }
       })
       .catch(() => {
         // token 失效，清除并显示登录表单
@@ -43,10 +47,18 @@ export function LoginPage() {
 
   const login = useMutation({
     mutationFn: (v: LoginValues) => authApi.login(v),
-    onSuccess: (v, variables) => {
+    onSuccess: async (v, variables) => {
       setSession(v, variables.remember);
-      message.success('登录成功');
-      nav('/dashboard');
+      try {
+        // 登录接口返回令牌；再读取 /me，保证前端使用后端确认的用户角色。
+        const user = await authApi.me();
+        setUser(user);
+        message.success('登录成功');
+        nav(getDefaultPath(user));
+      } catch {
+        clear();
+        message.error('登录状态验证失败，请重新登录');
+      }
     },
     onError: (e) => message.error(e.message),
   });

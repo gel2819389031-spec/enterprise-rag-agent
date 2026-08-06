@@ -11,30 +11,36 @@ import {
   RobotOutlined,
   UnorderedListOutlined,
 } from '@ant-design/icons';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { authApi } from '../api/modules';
 import { useAuthStore } from '../stores/authStore';
+import { isAdmin } from '../utils/role';
 const { Sider, Header, Content } = Layout;
-const items = [
+const adminItems = [
   ['/dashboard', <AppstoreOutlined />, '总览'],
   ['/knowledge', <BookOutlined />, '知识库'],
-  ['/chat', <CommentOutlined />, 'RAG 对话'],
   ['/retrieval', <ExperimentOutlined />, 'RAG 测评'],
   ['/tasks', <UnorderedListOutlined />, '任务中心'],
   ['/traces', <FileSearchOutlined />, 'Trace'],
 ].map(([key, icon, label]) => ({ key: key as string, icon, label }));
+
+const chatItem = { key: '/chat', icon: <CommentOutlined />, label: 'RAG 对话' };
 export function ConsoleLayout() {
   const nav = useNavigate(),
     loc = useLocation(),
     { message } = App.useApp();
-  const { user, refreshToken, setUser, clear } = useAuthStore();
+  const { accessToken, user, refreshToken, setUser, clear } = useAuthStore();
+  const menuItems = isAdmin(user) ? [...adminItems.slice(0, 2), chatItem, ...adminItems.slice(2)] : [chatItem];
+  const currentUser = useQuery({
+    queryKey: ['auth', 'me'],
+    queryFn: authApi.me,
+    enabled: Boolean(accessToken) && !user,
+    retry: false,
+  });
+
   useEffect(() => {
-    if (!user)
-      authApi
-        .me()
-        .then(setUser)
-        .catch(() => undefined);
-  }, [user, setUser]);
+    if (currentUser.data) setUser(currentUser.data);
+  }, [currentUser.data, setUser]);
   const logout = useMutation({
     mutationFn: async () => {
       if (refreshToken) await authApi.logout(refreshToken);
@@ -60,8 +66,8 @@ export function ConsoleLayout() {
         <Menu
           theme="dark"
           mode="inline"
-          selectedKeys={[items.find((i) => loc.pathname.startsWith(i.key))?.key ?? '/dashboard']}
-          items={items}
+          selectedKeys={[menuItems.find((i) => loc.pathname.startsWith(i.key))?.key ?? '/chat']}
+          items={menuItems}
           onClick={({ key }) => nav(key)}
         />
       </Sider>
