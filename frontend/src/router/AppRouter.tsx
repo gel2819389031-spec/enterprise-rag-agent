@@ -11,7 +11,7 @@ import { KnowledgePage } from '../pages/KnowledgePage';
 import { DocumentsPage } from '../pages/DocumentsPage';
 import { ChatPage } from '../pages/ChatPage';
 import { TaskPage } from '../pages/TaskPage';
-import { PlaceholderPage } from '../pages/PlaceholderPage';
+import { TracePage } from '../pages/TracePage';
 import { RagEvaluationPage } from '../pages/RagEvaluationPage';
 import { AdminRouteGuard } from './AdminRouteGuard';
 import { getDefaultPath } from '../utils/role';
@@ -65,7 +65,7 @@ const router = createBrowserRouter([
               { path: '/knowledge/:knowledgeBaseId/documents', element: <DocumentsPage /> },
               { path: '/tasks', element: <TaskPage /> },
               { path: '/retrieval', element: <RagEvaluationPage /> },
-              { path: '/traces', element: <PlaceholderPage kind="traces" /> },
+              { path: '/traces', element: <TracePage /> },
             ],
           },
         ],
