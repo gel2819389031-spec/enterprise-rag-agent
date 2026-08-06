@@ -1,11 +1,15 @@
 package com.example.rag.trace.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.rag.chat.client.dto.PythonRagTraceData;
+import com.example.rag.common.api.PageResult;
 import com.example.rag.common.error.BaseErrorCode;
 import com.example.rag.common.error.ClientException;
-import com.example.rag.common.security.CurrentUserProvider;
+import com.example.rag.trace.dto.RagTraceListItem;
+import com.example.rag.trace.dto.RagTraceQueryRequest;
 import com.example.rag.trace.dto.RagTraceResponse;
+import com.example.rag.trace.dto.RagTraceStatisticsResponse;
 import com.example.rag.trace.entity.RagTrace;
 import com.example.rag.trace.mapper.RagTraceMapper;
 import com.example.rag.trace.service.RagTraceService;
@@ -18,6 +22,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import com.example.rag.common.context.UserContext;
+import org.springframework.util.StringUtils;
+
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.List;
 import org.springframework.util.StringUtils;
 
 import java.util.List;
@@ -275,14 +284,109 @@ public class RagTraceServiceImpl implements RagTraceService {
         }
     }
 
-    private String limitText(
-            String text,
-            int maxLength
-    ) {
+    // ──────────────────────────────────────────────
+    // 分页列表 + 统计
+    // ──────────────────────────────────────────────
+
+    @Override
+    public PageResult<RagTraceListItem> pageTraces(RagTraceQueryRequest request) {
+        Long tenantId = currentTenantIdRequired();
+        Long pageNo = request.getPageNo() == null || request.getPageNo() < 1 ? 1L : request.getPageNo();
+        Long pageSize = request.getPageSize() == null || request.getPageSize() < 1
+                ? 20L : Math.min(request.getPageSize(), 100L);
+
+        LambdaQueryWrapper<RagTrace> wrapper = new LambdaQueryWrapper<RagTrace>()
+                .eq(RagTrace::getTenantId, tenantId)
+                .orderByDesc(RagTrace::getCreatedAt);
+
+        if (StringUtils.hasText(request.getStatus())) {
+            wrapper.eq(RagTrace::getStatus, request.getStatus().toUpperCase());
+        }
+        if (request.getConversationId() != null) {
+            wrapper.eq(RagTrace::getConversationId, request.getConversationId());
+        }
+        if (StringUtils.hasText(request.getKeyword())) {
+            wrapper.and(w -> w
+                    .like(RagTrace::getRequestId, request.getKeyword())
+                    .or()
+                    .like(RagTrace::getInput, request.getKeyword()));
+        }
+
+        Page<RagTrace> page = traceMapper.selectPage(new Page<>(pageNo, pageSize), wrapper);
+
+        List<RagTraceListItem> items = page.getRecords().stream()
+                .map(trace -> RagTraceListItem.builder()
+                        .id(trace.getId())
+                        .conversationId(trace.getConversationId())
+                        .status(trace.getStatus())
+                        .latencyMs(trace.getLatencyMs())
+                        .question(extractQuestion(trace.getInput()))
+                        .intent(extractIntent(trace.getOutput()))
+                        .degraded("DEGRADED".equals(trace.getStatus()))
+                        .createdAt(trace.getCreatedAt())
+                        .build())
+                .toList();
+
+        return PageResult.of(items, page.getTotal(), page.getCurrent(), page.getSize());
+    }
+
+    @Override
+    public RagTraceStatisticsResponse statistics() {
+        Long tenantId = currentTenantIdRequired();
+        List<RagTrace> all = traceMapper.selectList(
+                new LambdaQueryWrapper<RagTrace>()
+                        .eq(RagTrace::getTenantId, tenantId));
+
+        long total = all.size();
+        long success = all.stream().filter(t -> "SUCCESS".equals(t.getStatus())).count();
+        long failed = all.stream().filter(t -> "FAILED".equals(t.getStatus())).count();
+        long degraded = all.stream().filter(t -> "DEGRADED".equals(t.getStatus())).count();
+
+        double avgLatency = all.stream()
+                .filter(t -> t.getLatencyMs() != null)
+                .mapToLong(RagTrace::getLatencyMs)
+                .average().orElse(0);
+
+        Instant todayStart = Instant.now().truncatedTo(ChronoUnit.DAYS);
+        long todayCount = all.stream()
+                .filter(t -> t.getCreatedAt() != null && !t.getCreatedAt().isBefore(todayStart))
+                .count();
+
+        return RagTraceStatisticsResponse.builder()
+                .totalCount(total)
+                .successCount(success)
+                .failedCount(failed)
+                .degradedCount(degraded)
+                .successRate(total > 0 ? (double) success / total : 0)
+                .avgLatencyMs((long) avgLatency)
+                .todayCount(todayCount)
+                .build();
+    }
+
+    private String extractQuestion(String inputJson) {
+        if (inputJson == null) return null;
+        try {
+            JsonNode node = objectMapper.readTree(inputJson);
+            String q = node.path("question").asText(null);
+            return q != null && q.length() > 80 ? q.substring(0, 80) + "..." : q;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private String extractIntent(String outputJson) {
+        if (outputJson == null) return null;
+        try {
+            return objectMapper.readTree(outputJson).path("intent").asText(null);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private String limitText(String text, int maxLength) {
         if (text == null || text.length() <= maxLength) {
             return text;
         }
-
         return text.substring(0, maxLength);
     }
 

@@ -26,7 +26,7 @@ public class RagTraceRoot {
     }
 
     /**
-     * 返回链路 ID。
+     * 返回链路 ID。执行
      */
     public String getTraceId() {
         return traceId;
