@@ -2,21 +2,13 @@ package com.example.rag.ingestion.controller;
 
 import com.example.rag.common.api.ApiResult;
 import com.example.rag.common.api.PageResult;
-import com.example.rag.common.error.BaseErrorCode;
-import com.example.rag.common.error.BusinessException;
-import com.example.rag.common.security.CurrentUserProvider;
 import com.example.rag.embedding.service.ChunkEmbeddingService;
 import com.example.rag.ingestion.dto.*;
-import com.example.rag.ingestion.entity.IngestionTask;
-import com.example.rag.ingestion.entity.IngestionTaskStep;
-import com.example.rag.ingestion.event.IngestionTaskStartEvent;
-import com.example.rag.ingestion.pipeline.StepCode;
-import com.example.rag.ingestion.processer.DocumentIngestionProcessor;
 import com.example.rag.ingestion.service.IngestionTaskQueryService;
 import com.example.rag.ingestion.service.IngestionTaskRetryService;
 import com.example.rag.ingestion.service.IngestionTaskService;
 import lombok.RequiredArgsConstructor;
-import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -27,6 +19,7 @@ import java.util.List;
 @RestController
 @RequiredArgsConstructor
 @RequestMapping("/api/ingestion/tasks")
+@PreAuthorize("hasAnyRole('PLATFORM_ADMIN', 'ADMIN')")
 public class IngestionTaskController {
 
     private final IngestionTaskService ingestionTaskService;

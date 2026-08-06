@@ -2,6 +2,7 @@ package com.example.rag.knowledge.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.example.rag.chat.dto.ChatKnowledgeBaseOption;
 import com.example.rag.common.api.PageResult;
 import com.example.rag.common.context.UserContext;
 import com.example.rag.common.error.BaseErrorCode;
@@ -186,6 +187,20 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
             throw new BusinessException(BaseErrorCode.FORBIDDEN, "知识库不可用");
         }
         return knowledgeBase;
+    }
+    @Override
+    public List<ChatKnowledgeBaseOption> listAvailableForChat() {
+        // 从 JWT 上下文获取租户，普通用户不能自行传 tenantId。
+        Long tenantId = currentUserProvider.requireTenantId();
+
+        // 只返回当前租户已启用、未删除的知识库。
+        return knowledgeBaseMapper.selectAvailableForChat(tenantId)
+                .stream()
+                .map(knowledgeBase -> ChatKnowledgeBaseOption.builder()
+                        .id(knowledgeBase.getId())
+                        .name(knowledgeBase.getName())
+                        .build())
+                .toList();
     }
 
     private KnowledgeBase selectCurrentTenantKnowledgeBase(Long knowledgeBaseId) {

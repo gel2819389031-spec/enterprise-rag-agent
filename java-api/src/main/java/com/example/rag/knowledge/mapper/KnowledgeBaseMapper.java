@@ -6,6 +6,8 @@ import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
+import java.util.List;
+
 /**
  * 知识库 Mapper，占位接口。
  *
@@ -74,6 +76,21 @@ public interface KnowledgeBaseMapper extends BaseMapper<KnowledgeBase> {
         """)
     KnowledgeBase selectTaskReference(
             @Param("knowledgeBaseId") Long knowledgeBaseId,
+            @Param("tenantId") Long tenantId
+    );
+
+    /**
+     * 查询当前租户中可供 RAG 对话使用的知识库。
+     */
+    @Select("""
+        SELECT id, name
+        FROM kb_knowledge_base
+        WHERE tenant_id = #{tenantId}
+          AND deleted = false
+          AND status = 1
+        ORDER BY updated_at DESC
+        """)
+    List<KnowledgeBase> selectAvailableForChat(
             @Param("tenantId") Long tenantId
     );
 }

@@ -1,6 +1,7 @@
 package com.example.rag.chat.controller;
 
 import com.example.rag.chat.dto.ChatConversationQueryRequest;
+import com.example.rag.chat.dto.ChatKnowledgeBaseOption;
 import com.example.rag.chat.dto.ChatRequest;
 import com.example.rag.chat.dto.ChatResponse;
 import com.example.rag.chat.entity.ChatConversation;
@@ -8,6 +9,7 @@ import com.example.rag.chat.entity.ChatMessage;
 import com.example.rag.chat.service.ChatService;
 import com.example.rag.common.api.ApiResult;
 import com.example.rag.common.api.PageResult;
+import com.example.rag.knowledge.service.KnowledgeBaseService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
@@ -32,6 +34,7 @@ import java.util.List;
 public class ChatController {
 
     private final ChatService chatService;
+    private final KnowledgeBaseService knowledgeBaseService;
 
     /**
      * 用户提问并返回回答。
@@ -93,5 +96,17 @@ public class ChatController {
     public ApiResult<Void> deleteConversation(@PathVariable("conversationId") Long conversationId) {
         chatService.deleteConversation(conversationId);
         return ApiResult.ok();
+    }
+    /**
+     * 查询当前租户可用于 RAG 对话的知识库。
+     *
+     * 所有已登录用户可调用；管理员的知识库管理接口仍单独受限。
+     */
+    @GetMapping("/knowledge-bases")
+    public ApiResult<List<ChatKnowledgeBaseOption>>
+    listAvailableKnowledgeBases() {
+        return ApiResult.ok(
+                knowledgeBaseService.listAvailableForChat()
+        );
     }
 }

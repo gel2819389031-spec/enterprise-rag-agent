@@ -1,10 +1,13 @@
 package com.example.rag.knowledge.service;
 
+import com.example.rag.chat.dto.ChatKnowledgeBaseOption;
 import com.example.rag.common.api.PageResult;
 import com.example.rag.knowledge.dto.KnowledgeBaseCreateRequest;
 import com.example.rag.knowledge.dto.KnowledgeBaseQueryRequest;
 import com.example.rag.knowledge.dto.KnowledgeBaseUpdateRequest;
 import com.example.rag.knowledge.entity.KnowledgeBase;
+
+import java.util.List;
 
 /**
  * 知识库服务接口。
@@ -54,4 +57,6 @@ public interface KnowledgeBaseService {
      * <p>实际用途：文档上传、检索和问答前统一校验知识库存在、未删除且状态可用。</p>
      */
     KnowledgeBase ensureUsable(Long knowledgeBaseId);
+
+    List<ChatKnowledgeBaseOption> listAvailableForChat();
 }

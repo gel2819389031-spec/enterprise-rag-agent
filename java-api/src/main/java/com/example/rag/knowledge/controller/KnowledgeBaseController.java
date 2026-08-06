@@ -1,5 +1,6 @@
 package com.example.rag.knowledge.controller;
 
+import com.example.rag.chat.dto.ChatKnowledgeBaseOption;
 import com.example.rag.common.api.ApiResult;
 import com.example.rag.common.api.PageResult;
 import com.example.rag.knowledge.dto.KnowledgeBaseCreateRequest;
@@ -8,6 +9,7 @@ import com.example.rag.knowledge.dto.KnowledgeBaseUpdateRequest;
 import com.example.rag.knowledge.entity.KnowledgeBase;
 import com.example.rag.knowledge.service.KnowledgeBaseService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -18,11 +20,14 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
+
 /**
  * 知识库管理接口。
  */
 @RestController
 @RequestMapping("/api/knowledge-bases")
+@PreAuthorize("hasAnyRole('PLATFORM_ADMIN', 'ADMIN')")
 @RequiredArgsConstructor
 public class KnowledgeBaseController {
 
@@ -75,4 +80,6 @@ public class KnowledgeBaseController {
         knowledgeBaseService.deleteKnowledgeBase(knowledgeBaseId);
         return ApiResult.ok();
     }
+
+
 }
