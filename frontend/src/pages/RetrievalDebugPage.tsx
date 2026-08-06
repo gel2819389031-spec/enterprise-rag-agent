@@ -73,6 +73,14 @@ export function RetrievalDebugPage(
   }, [result]);
 
   const submit = (values: RetrievalDebugRequest) => {
+    if (
+      values.mode === 'HYBRID'
+      && values.vectorWeight === 0
+      && values.keywordWeight === 0
+    ) {
+      message.error('向量权重和关键词权重不能同时为 0');
+      return;
+    }
     debugMutation.mutate({
       ...values,
       question: values.question.trim(),
@@ -101,6 +109,8 @@ export function RetrievalDebugPage(
             fusionTopK: 10,
             finalTopK: 5,
             rrfK: 60,
+            vectorWeight: 1,
+            keywordWeight: 1,
           }}
           onFinish={submit}
         >
@@ -189,6 +199,28 @@ export function RetrievalDebugPage(
                     <Col span={4}>
                       <Form.Item name="rrfK" label="RRF K">
                         <InputNumber min={1} max={1000} disabled={mode !== 'HYBRID'} />
+                      </Form.Item>
+                    </Col>
+                    <Col span={4}>
+                      <Form.Item name="vectorWeight" label="向量权重">
+                        <InputNumber
+                          min={0}
+                          max={10}
+                          step={0.1}
+                          precision={2}
+                          disabled={mode !== 'HYBRID'}
+                        />
+                      </Form.Item>
+                    </Col>
+                    <Col span={4}>
+                      <Form.Item name="keywordWeight" label="关键词权重">
+                        <InputNumber
+                          min={0}
+                          max={10}
+                          step={0.1}
+                          precision={2}
+                          disabled={mode !== 'HYBRID'}
+                        />
                       </Form.Item>
                     </Col>
                   </Row>

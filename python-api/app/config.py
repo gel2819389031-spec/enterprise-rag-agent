@@ -57,6 +57,8 @@ class Settings:
     retrieval_keyword_top_k: int
     retrieval_final_top_k: int
     retrieval_rrf_k: int
+    retrieval_vector_weight: float
+    retrieval_keyword_weight: float
     retrieval_enable_keyword: bool
 
     # Rerank 精排配置。
@@ -134,6 +136,12 @@ def get_settings() -> Settings:
         ),
         retrieval_rrf_k=int(
             os.getenv("RETRIEVAL_RRF_K", "60")
+        ),
+        retrieval_vector_weight=float(
+            os.getenv("RETRIEVAL_VECTOR_WEIGHT", "1.0")
+        ),
+        retrieval_keyword_weight=float(
+            os.getenv("RETRIEVAL_KEYWORD_WEIGHT", "1.0")
         ),
         retrieval_enable_keyword=(
                 os.getenv("RETRIEVAL_ENABLE_KEYWORD", "true").lower()

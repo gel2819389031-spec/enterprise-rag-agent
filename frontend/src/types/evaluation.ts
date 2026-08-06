@@ -11,6 +11,8 @@ export interface EvaluationCreateRequest {
   knowledgeBaseId: string;
   datasetCode: 'CRUD_RAG_V1' | 'CRUD_RAG_V2';
   experiments: EvaluationExperiment[];
+  vectorWeight: number;
+  keywordWeight: number;
 }
 
 export interface EvaluationRun {

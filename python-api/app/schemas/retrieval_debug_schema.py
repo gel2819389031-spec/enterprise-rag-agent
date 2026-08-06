@@ -36,6 +36,8 @@ class RetrievalDebugRequest(CamelModel):
     fusion_top_k: int | None = Field(None, alias="fusionTopK", ge=1, le=100)
     final_top_k: int | None = Field(None, alias="finalTopK", ge=1, le=50)
     rrf_k: int | None = Field(None, alias="rrfK", ge=1, le=1000)
+    vector_weight: float | None = Field(None, alias="vectorWeight", ge=0, le=10)
+    keyword_weight: float | None = Field(None, alias="keywordWeight", ge=0, le=10)
 
 
 class RetrievalCandidateData(CamelModel):

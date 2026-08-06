@@ -1,6 +1,8 @@
 package com.example.rag.retrieval.dto;
 
 import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.DecimalMax;
+import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -59,4 +61,14 @@ public class RetrievalDebugRequest {
     @Min(value = 1, message = "rrfK 不能小于 1")
     @Max(value = 1000, message = "rrfK 不能大于 1000")
     private Integer rrfK;
+
+    /** 向量召回结果在 Weighted RRF 中的权重；不传时使用 Python 默认配置。 */
+    @DecimalMin(value = "0.0", message = "vectorWeight 不能小于 0")
+    @DecimalMax(value = "10.0", message = "vectorWeight 不能大于 10")
+    private Double vectorWeight;
+
+    /** 关键词召回结果在 Weighted RRF 中的权重；不传时使用 Python 默认配置。 */
+    @DecimalMin(value = "0.0", message = "keywordWeight 不能小于 0")
+    @DecimalMax(value = "10.0", message = "keywordWeight 不能大于 10")
+    private Double keywordWeight;
 }

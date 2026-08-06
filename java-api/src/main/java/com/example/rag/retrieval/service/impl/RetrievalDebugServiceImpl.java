@@ -91,6 +91,8 @@ public class RetrievalDebugServiceImpl
                         .fusionTopK(request.getFusionTopK())
                         .finalTopK(request.getFinalTopK())
                         .rrfK(request.getRrfK())
+                        .vectorWeight(request.getVectorWeight())
+                        .keywordWeight(request.getKeywordWeight())
                         .build();
 
         log.info(
@@ -165,6 +167,21 @@ public class RetrievalDebugServiceImpl
                     "检索问题不能超过 4000 个字符"
             );
         }
+
+        // Weighted RRF 可以关闭一路召回，但混合检索不能同时关闭两路。
+        if (defaultMode(request.getMode()) == RetrievalMode.HYBRID
+                && Double.compare(defaultWeight(request.getVectorWeight()), 0D) == 0
+                && Double.compare(defaultWeight(request.getKeywordWeight()), 0D) == 0) {
+            throw new ClientException(
+                    BaseErrorCode.BAD_REQUEST,
+                    "向量权重和关键词权重不能同时为 0"
+            );
+        }
+    }
+
+    /** 未显式传入权重时按默认权重 1 参与校验。 */
+    private double defaultWeight(Double weight) {
+        return weight == null ? 1D : weight;
     }
 
     /**

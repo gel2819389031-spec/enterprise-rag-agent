@@ -31,6 +31,8 @@ class EvaluationCreateRequest(CamelModel):
     knowledge_base_id: int = Field(..., alias="knowledgeBaseId")
     dataset_code: str = Field(default="CRUD_RAG_V1", alias="datasetCode")
     experiments: list[EvaluationExperiment] = Field(min_length=1)
+    vector_weight: float = Field(default=1.0, alias="vectorWeight", ge=0, le=10)
+    keyword_weight: float = Field(default=1.0, alias="keywordWeight", ge=0, le=10)
 
 
 class EvaluationRunData(CamelModel):

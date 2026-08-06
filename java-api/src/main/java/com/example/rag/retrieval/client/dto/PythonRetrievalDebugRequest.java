@@ -53,4 +53,10 @@ public class PythonRetrievalDebugRequest {
 
     /** RRF 平滑参数。 */
     private Integer rrfK;
+
+    /** 向量召回结果在 Weighted RRF 中的权重。 */
+    private Double vectorWeight;
+
+    /** 关键词召回结果在 Weighted RRF 中的权重。 */
+    private Double keywordWeight;
 }

@@ -2,6 +2,8 @@ package com.example.rag.evaluation.dto;
 
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.DecimalMax;
+import jakarta.validation.constraints.DecimalMin;
 import lombok.Data;
 
 import java.util.List;
@@ -17,4 +19,16 @@ public class EvaluationCreateRequest {
     /** 需要执行的检索实验。 */
     @NotEmpty
     private List<String> experiments;
+
+    /** 向量召回结果在 Weighted RRF 中的权重。 */
+    @NotNull
+    @DecimalMin("0.0")
+    @DecimalMax("10.0")
+    private Double vectorWeight = 1.0D;
+
+    /** 关键词召回结果在 Weighted RRF 中的权重。 */
+    @NotNull
+    @DecimalMin("0.0")
+    @DecimalMax("10.0")
+    private Double keywordWeight = 1.0D;
 }

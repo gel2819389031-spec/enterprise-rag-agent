@@ -44,6 +44,8 @@ public class EvaluationServiceImpl implements EvaluationService {
         pythonRequest.put("knowledgeBaseId", request.getKnowledgeBaseId());
         pythonRequest.put("datasetCode", request.getDatasetCode());
         pythonRequest.put("experiments", request.getExperiments());
+        pythonRequest.put("vectorWeight", request.getVectorWeight());
+        pythonRequest.put("keywordWeight", request.getKeywordWeight());
         return pythonClient.create(pythonRequest);
     }
 
@@ -79,6 +81,16 @@ public class EvaluationServiceImpl implements EvaluationService {
                 || request.getExperiments().isEmpty()
                 || !SUPPORTED_EXPERIMENTS.containsAll(request.getExperiments())) {
             throw new ClientException(BaseErrorCode.BAD_REQUEST, "包含不支持的评测实验");
+        }
+        if (request.getVectorWeight() == null || request.getKeywordWeight() == null) {
+            throw new ClientException(BaseErrorCode.BAD_REQUEST, "检索权重不能为空");
+        }
+        boolean includesHybridExperiment = request.getExperiments().stream()
+                .anyMatch(experiment -> experiment.startsWith("HYBRID"));
+        if (includesHybridExperiment
+                && Double.compare(request.getVectorWeight(), 0D) == 0
+                && Double.compare(request.getKeywordWeight(), 0D) == 0) {
+            throw new ClientException(BaseErrorCode.BAD_REQUEST, "向量权重和关键词权重不能同时为 0");
         }
     }
 

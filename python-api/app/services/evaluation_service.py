@@ -185,6 +185,8 @@ class EvaluationService:
                     fusion_top_k=20,
                     final_top_k=8,
                     rrf_k=60,
+                    vector_weight=request.vector_weight,
+                    keyword_weight=request.keyword_weight,
                 )
             )
             candidates = getattr(data, result_field)

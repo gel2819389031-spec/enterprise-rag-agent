@@ -13,6 +13,8 @@ export interface RetrievalDebugRequest {
   fusionTopK?: number;
   finalTopK?: number;
   rrfK?: number;
+  vectorWeight?: number;
+  keywordWeight?: number;
 }
 
 /** 检索阶段返回的候选分片。 */

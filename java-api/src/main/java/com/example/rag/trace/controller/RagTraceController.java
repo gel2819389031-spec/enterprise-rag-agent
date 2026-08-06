@@ -4,6 +4,7 @@ import com.example.rag.common.api.ApiResult;
 import com.example.rag.trace.dto.RagTraceResponse;
 import com.example.rag.trace.service.RagTraceService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -13,6 +14,7 @@ import java.util.List;
  */
 @RestController
 @RequestMapping("/api/rag/traces")
+@PreAuthorize("hasAnyRole('PLATFORM_ADMIN', 'ADMIN')")
 @RequiredArgsConstructor
 public class RagTraceController {
 

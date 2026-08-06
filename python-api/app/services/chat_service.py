@@ -39,6 +39,7 @@ from app.schemas.chat_schema import (
     ChatHistoryMessage,
     ChatRequest,
 )
+from app.schemas.routing_schema import ResolvedQuery
 from app.schemas.trace_schema import TokenUsage
 from app.services.rerank_service import RerankService
 from app.streaming.sse_encoder import SseEncoder
@@ -425,7 +426,7 @@ class ChatService:
         with recorder.node(
             "QUERY_RESOLVE",
             {
-                "historyCount": len(request.history),
+                "historyCount": len(request.history)
             },
         ) as node:
             resolved_query = self._query_resolver.resolve(

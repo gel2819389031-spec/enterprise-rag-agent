@@ -26,7 +26,9 @@ class HybridRetriever:
         self._vector_retriever = PgVectorRetriever()
         self._keyword_retriever = KeywordRetriever()
         self._rrf_fusion = RrfFusion(
-            rrf_k=self._settings.retrieval_rrf_k
+            rrf_k=self._settings.retrieval_rrf_k,
+            vector_weight=self._settings.retrieval_vector_weight,
+            keyword_weight=self._settings.retrieval_keyword_weight,
         )
 
     def retrieve(

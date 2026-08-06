@@ -81,6 +81,27 @@ class RetrievalDebugService:
                 request.rrf_k
                 or self._settings.retrieval_rrf_k
         )
+        vector_weight = (
+            request.vector_weight
+            if request.vector_weight is not None
+            else self._settings.retrieval_vector_weight
+        )
+        keyword_weight = (
+            request.keyword_weight
+            if request.keyword_weight is not None
+            else self._settings.retrieval_keyword_weight
+        )
+
+        # 权重只影响混合检索；允许关闭一路，但不能同时关闭两路。
+        if (
+            request.mode == RetrievalMode.HYBRID
+            and vector_weight == 0
+            and keyword_weight == 0
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="at least one retrieval weight must be positive",
+            )
 
         timings = RetrievalTimingData()
         warnings: list[str] = []
@@ -167,7 +188,9 @@ class RetrievalDebugService:
 
         if request.mode == RetrievalMode.HYBRID:
             fusion_candidates = RrfFusion(
-                rrf_k=rrf_k
+                rrf_k=rrf_k,
+                vector_weight=vector_weight,
+                keyword_weight=keyword_weight,
             ).fuse(
                 vector_candidates=vector_candidates,
                 keyword_candidates=keyword_candidates,

@@ -9,6 +9,7 @@ import {
   Checkbox,
   Descriptions,
   Form,
+  InputNumber,
   Progress,
   Select,
   Space,
@@ -108,6 +109,20 @@ function EvaluationPanel() {
   const running = statusQuery.data?.status === 'PENDING'
     || statusQuery.data?.status === 'RUNNING';
 
+  const submitEvaluation = (values: EvaluationCreateRequest) => {
+    const includesHybridExperiment = values.experiments.some((item) =>
+      item.startsWith('HYBRID'));
+    if (
+      includesHybridExperiment
+      && values.vectorWeight === 0
+      && values.keywordWeight === 0
+    ) {
+      message.error('向量权重和关键词权重不能同时为 0');
+      return;
+    }
+    createMutation.mutate(values);
+  };
+
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
       <Card title="评测配置" size="small">
@@ -117,8 +132,10 @@ function EvaluationPanel() {
           initialValues={{
             datasetCode: 'CRUD_RAG_V1',
             experiments: ['VECTOR', 'KEYWORD', 'HYBRID', 'HYBRID_RERANK'],
+            vectorWeight: 0.5,
+            keywordWeight: 1,
           }}
-          onFinish={(values) => createMutation.mutate(values)}
+          onFinish={submitEvaluation}
         >
           <Space size={24} align="start" wrap>
             <Form.Item
@@ -155,6 +172,25 @@ function EvaluationPanel() {
           >
             <Checkbox.Group options={experimentOptions} />
           </Form.Item>
+
+          <Space size={24} align="start" wrap>
+            <Form.Item
+              name="vectorWeight"
+              label="向量权重"
+              tooltip="向量召回排名在 Weighted RRF 中的权重"
+              rules={[{ required: true, message: '请输入向量权重' }]}
+            >
+              <InputNumber min={0} max={10} step={0.1} precision={2} />
+            </Form.Item>
+            <Form.Item
+              name="keywordWeight"
+              label="关键词权重"
+              tooltip="关键词召回排名在 Weighted RRF 中的权重"
+              rules={[{ required: true, message: '请输入关键词权重' }]}
+            >
+              <InputNumber min={0} max={10} step={0.1} precision={2} />
+            </Form.Item>
+          </Space>
 
           {datasetCode === 'CRUD_RAG_V2' && (
             <Alert
