@@ -84,7 +84,9 @@ class LlmClient:
 
         # RAG 模式没有上下文时，不允许模型使用通用知识补答。
         if rag_mode and not context.strip():
-            return self._settings.rag_empty_context_message
+            return LlmResult(
+                answer=self._settings.rag_empty_context_message,
+                token_usage=TokenUsage(),)
         # 将 Java 的历史消息转换为 LangChain Message。
         history_messages = self._build_history_messages(
             history
@@ -164,13 +166,7 @@ class LlmClient:
             # RAG 模式必须提供检索上下文。
             # 正常情况下 ChatService 会提前处理无依据分支。
         if rag_mode and not context.strip():
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    "RAG context must not be blank "
-                    "when rag_mode is true"
-                ),
-            )
+            "RAG context is empty before streaming LLM invocation"
         # 将 Java 传入的历史消息转换为 LangChain Message。
         history_messages = self._build_history_messages(
             history
