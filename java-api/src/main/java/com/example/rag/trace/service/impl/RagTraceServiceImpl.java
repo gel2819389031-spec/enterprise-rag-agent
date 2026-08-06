@@ -6,6 +6,7 @@ import com.example.rag.chat.client.dto.PythonRagTraceData;
 import com.example.rag.common.api.PageResult;
 import com.example.rag.common.error.BaseErrorCode;
 import com.example.rag.common.error.ClientException;
+import com.example.rag.common.security.CurrentUserProvider;
 import com.example.rag.trace.dto.RagTraceListItem;
 import com.example.rag.trace.dto.RagTraceQueryRequest;
 import com.example.rag.trace.dto.RagTraceResponse;
@@ -290,7 +291,7 @@ public class RagTraceServiceImpl implements RagTraceService {
 
     @Override
     public PageResult<RagTraceListItem> pageTraces(RagTraceQueryRequest request) {
-        Long tenantId = currentTenantIdRequired();
+        Long tenantId = currentUserProvider.requireTenantId();
         Long pageNo = request.getPageNo() == null || request.getPageNo() < 1 ? 1L : request.getPageNo();
         Long pageSize = request.getPageSize() == null || request.getPageSize() < 1
                 ? 20L : Math.min(request.getPageSize(), 100L);
@@ -332,7 +333,7 @@ public class RagTraceServiceImpl implements RagTraceService {
 
     @Override
     public RagTraceStatisticsResponse statistics() {
-        Long tenantId = currentTenantIdRequired();
+        Long tenantId = currentUserProvider.requireTenantId();
         List<RagTrace> all = traceMapper.selectList(
                 new LambdaQueryWrapper<RagTrace>()
                         .eq(RagTrace::getTenantId, tenantId));
