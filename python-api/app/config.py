@@ -43,6 +43,15 @@ class Settings:
     llm_model: str
     llm_temperature: float
     llm_timeout_seconds: int
+    # LLM 备用模型 1
+    llm_fallback1_model: str
+    llm_fallback1_base_url: str
+    llm_fallback1_api_key: str
+    # LLM 备用模型 2
+    llm_fallback2_model: str
+    llm_fallback2_base_url: str
+    llm_fallback2_api_key: str
+
     # PostgreSQL
     postgres_host: str
     postgres_port: int
@@ -118,6 +127,12 @@ def get_settings() -> Settings:
         llm_model=os.getenv("LLM_MODEL", "qwen-plus"),
         llm_temperature=float(os.getenv("LLM_TEMPERATURE", "0.2")),
         llm_timeout_seconds=int(os.getenv("LLM_TIMEOUT_SECONDS", "60")),
+        llm_fallback1_model=os.getenv("LLM_FALLBACK1_MODEL", "gpt-3.5-turbo"),
+        llm_fallback1_base_url=os.getenv("LLM_FALLBACK1_BASE_URL", ""),
+        llm_fallback1_api_key=os.getenv("LLM_FALLBACK1_API_KEY", ""),
+        llm_fallback2_model=os.getenv("LLM_FALLBACK2_MODEL", "gpt-3.5-turbo"),
+        llm_fallback2_base_url=os.getenv("LLM_FALLBACK2_BASE_URL", ""),
+        llm_fallback2_api_key=os.getenv("LLM_FALLBACK2_API_KEY", ""),
         postgres_host=os.getenv("POSTGRES_HOST", "127.0.0.1"),
         postgres_port=int(os.getenv("POSTGRES_PORT", "5432")),
         postgres_db=os.getenv("POSTGRES_DB", "enterprise_rag"),

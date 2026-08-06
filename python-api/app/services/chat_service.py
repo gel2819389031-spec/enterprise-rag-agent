@@ -304,7 +304,6 @@ class ChatService:
                 with recorder.node(
                     "LLM_GENERATE",
                     {
-                        "model": execution.model,
                         "streaming": True,
                     },
                 ) as node:
@@ -327,12 +326,15 @@ class ChatService:
                         # 最后一个分片可能包含 Token 用量。
                         if chunk.token_usage.total_tokens > 0:
                             token_usage = chunk.token_usage
+                            if chunk.model:
+                                model=chunk.model
 
                     # 拼接完整原始答案。
                     raw_answer = "".join(answer_parts)
 
                     node.set_output(
                         {
+                            "modelName":model,
                             "answerChars": len(raw_answer),
                             "inputTokens": (
                                 token_usage.input_tokens

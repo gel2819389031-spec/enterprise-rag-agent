@@ -1,9 +1,14 @@
 """LLM client used by the chat service."""
+import contextvars
+from typing import Any
+from uuid import UUID
 
 from fastapi import HTTPException
+from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_openai import ChatOpenAI
+from openai import max_retries
 
 from app.config import get_settings
 from app.schemas.chat_schema import ChatHistoryMessage, LlmResult
@@ -13,6 +18,18 @@ from collections.abc import Iterator
 from langchain_core.messages import AIMessageChunk
 
 from app.schemas.answer_schema import LlmStreamChunk, TokenUsage
+current_model_var=contextvars.ContextVar("current_model",default="unknown")
+# 回调中存储
+class ModelNameHandler(BaseCallbackHandler):
+    def __init__(self):
+        self._map = {}
+    def on_llm_start(self, serialized, prompts, **kwargs):
+        run_id = str(kwargs.get("run_id"))
+        params = kwargs.get("invocation_params", {})
+        model_name = params.get("model_name") or params.get("model") or "unknown"
+        self._map[run_id] = model_name
+    def get(self, run_id):
+        return self._map.get(str(run_id), "unknown")
 SYSTEM_PROMPT = """
 你是企业级 RAG 智能助手。
 
@@ -38,14 +55,39 @@ class LlmClient:
 
         # DashScope / Bailian is used through the OpenAI-compatible protocol,
         # so ChatOpenAI can talk to it by changing base_url and api_key.
-        self._chat_model = ChatOpenAI(
+        self.primary = ChatOpenAI(
             model=self._settings.llm_model,
             api_key=self._settings.llm_api_key,
             base_url=self._settings.llm_base_url,
             temperature=self._settings.llm_temperature,
             request_timeout=self._settings.llm_timeout_seconds,
+            max_retries=2,
             streaming=True,
         )
+        fallbacks=[]
+        if self._settings.llm_fallback1_api_key:
+            fallback1 = ChatOpenAI(
+                model=self._settings.llm_fallback1_model,
+                api_key=self._settings.llm_fallback1_api_key,
+                base_url=self._settings.llm_fallback1_base_url,
+                temperature=self._settings.llm_temperature,
+                request_timeout=self._settings.llm_timeout_seconds,
+                max_retries=2,
+                streaming=True,
+            )
+            fallbacks.append(fallback1)
+        if self._settings.llm_fallback2_api_key:
+            fallback2 = ChatOpenAI(
+                model=self._settings.llm_fallback2_model,
+                api_key=self._settings.llm_fallback2_api_key,
+                base_url=self._settings.llm_fallback2_base_url,
+                temperature=self._settings.llm_temperature,
+                request_timeout=self._settings.llm_timeout_seconds,
+                max_retries=2,
+                streaming=True,
+                )
+            fallbacks.append(fallback2)
+
         # MessagesPlaceholder 用来插入 Java 传入的会话历史。
         self._prompt = ChatPromptTemplate.from_messages(
             [
@@ -62,7 +104,7 @@ class LlmClient:
                 ),
             ]
         )
-
+        self._chat_model=self.primary.with_fallbacks(fallbacks) if fallbacks else self.primary
         # 使用 LangChain LCEL 连接 Prompt 和聊天模型。
         self._chain = self._prompt | self._chat_model
 
@@ -120,11 +162,13 @@ class LlmClient:
             if isinstance(content, str)
             else str(content)
         )
-        token_usage = self._extract_token_usage(
+        actual_model = response.response_metadata.get("model_name", self._settings.llm_model)
+        model,token_usage = self._extract_token_usage(
             response
         )
         return LlmResult(
             answer=answer,
+            model=actual_model,
             token_usage=token_usage,
         )
 
@@ -179,13 +223,15 @@ class LlmClient:
         )
 
         # 组装 LangChain Chain 的输入参数。
+        handler = ModelNameHandler()
+        config = {'callbacks': [handler]}
         chain_input = {
             "history": history_messages,
             "current_input": current_input,
         }
 
         try:
-            for chunk in self._chain.stream(chain_input):
+            for chunk in self._chain.stream(chain_input,config=config):
                 # 提取当前分片中的文本。
                 content = self._extract_chunk_content(chunk)
                 # 从当前分片提取 Token 统计信息。
@@ -193,8 +239,11 @@ class LlmClient:
                 token_usage = self._extract_token_usage(chunk)
                 # 即使当前分片没有文本，也可能携带 Token 用量。
                 if content or token_usage.total_tokens > 0:
+                    run_id = chunk.id.replace("lc_run--", "") if chunk.id and chunk.id.startswith("lc_run--") else None
+                    model_name = handler.get(run_id) if run_id else "unknown"
                     yield LlmStreamChunk(
                         content=content,
+                        model=model_name,
                         token_usage=token_usage,
                     )
         except Exception as ex:
@@ -299,7 +348,6 @@ class LlmClient:
 
     @staticmethod
     def _extract_token_usage(message: BaseMessage) -> TokenUsage:
-        """提取普通消息或流式消息中的 Token 使用量。"""
         usage_metadata = getattr(message, "usage_metadata", None) or {}
 
         response_metadata = getattr(message, "response_metadata", None) or {}

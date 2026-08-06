@@ -46,6 +46,8 @@ class LlmStreamChunk(BaseModel):
         default="",
         description="本次新增的文本内容。",
     )
+    model:str=Field(default="",
+                    description="本次调用的模型。",)
 
     token_usage: TokenUsage = Field(
         default_factory=TokenUsage,

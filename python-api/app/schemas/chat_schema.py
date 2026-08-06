@@ -117,6 +117,7 @@ class LlmResult(BaseModel):
     """LLM Client 的统一返回结果。"""
 
     answer: str
+    model: str = ""
     token_usage: TokenUsage = Field(
         default_factory=TokenUsage,
     )
