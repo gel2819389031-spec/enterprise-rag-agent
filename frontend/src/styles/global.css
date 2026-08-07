@@ -1296,6 +1296,76 @@ button, input, textarea { letter-spacing: 0; }
 }
 
 /* ═══════════════════════════════════════════════════════
+   SETTINGS PAGE
+   ═══════════════════════════════════════════════════════ */
+
+.settings-layout {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: 0;
+  height: 100%;
+  min-height: 0;
+}
+
+.settings-nav {
+  border-right: 1px solid #E8ECF2;
+  padding: 20px 0;
+}
+
+.settings-nav-title {
+  padding: 0 20px 14px;
+  margin: 0 !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  color: #94A3B8 !important;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.settings-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 20px;
+  font-size: 14px;
+  color: #475569;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  border-right: 2px solid transparent;
+  margin: 2px 0;
+}
+
+.settings-nav-item:hover {
+  background: #F8FAFC;
+  color: #0F172A;
+}
+
+.settings-nav-item--active {
+  background: #EEF2FF;
+  color: #4F5BD5;
+  font-weight: 500;
+  border-right-color: #4F5BD5;
+}
+
+.settings-nav-icon {
+  font-size: 16px;
+  width: 20px;
+  text-align: center;
+}
+
+.settings-body {
+  padding: 24px 28px;
+  overflow-y: auto;
+}
+
+.settings-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+/* ═══════════════════════════════════════════════════════
    FEATURE / RETRIEVAL
    ═══════════════════════════════════════════════════════ */
 

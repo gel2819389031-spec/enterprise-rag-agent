@@ -15,8 +15,10 @@ public class RagTraceListItem {
     private Long conversationId;
     private String status;
     private Long latencyMs;
-    private String question;        // 从 input JSON 提取，最多 80 字符
-    private String intent;          // 从 output JSON 提取
+    private String question;
+    private String intent;
     private boolean degraded;
+    private Long userId;
+    private String username;
     private Instant createdAt;
 }

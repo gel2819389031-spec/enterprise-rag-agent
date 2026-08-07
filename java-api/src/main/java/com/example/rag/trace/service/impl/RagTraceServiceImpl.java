@@ -12,8 +12,12 @@ import com.example.rag.trace.dto.RagTraceQueryRequest;
 import com.example.rag.trace.dto.RagTraceResponse;
 import com.example.rag.trace.dto.RagTraceStatisticsResponse;
 import com.example.rag.trace.entity.RagTrace;
+import com.example.rag.chat.entity.ChatConversation;
+import com.example.rag.chat.mapper.ChatConversationMapper;
 import com.example.rag.trace.mapper.RagTraceMapper;
 import com.example.rag.trace.service.RagTraceService;
+import com.example.rag.user.entity.SysUser;
+import com.example.rag.user.mapper.SysUserMapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -28,6 +32,8 @@ import org.springframework.util.StringUtils;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 import org.springframework.util.StringUtils;
 
 import java.util.List;
@@ -43,6 +49,8 @@ import java.util.List;
 public class RagTraceServiceImpl implements RagTraceService {
 
     private final RagTraceMapper traceMapper;
+    private final ChatConversationMapper conversationMapper;
+    private final SysUserMapper userMapper;
     private final ObjectMapper objectMapper;
     private final CurrentUserProvider currentUserProvider;
 
@@ -328,6 +336,9 @@ public class RagTraceServiceImpl implements RagTraceService {
                         .build())
                 .toList();
 
+        // 批量填充用户名
+        fillUsernames(items);
+
         return PageResult.of(items, page.getTotal(), page.getCurrent(), page.getSize());
     }
 
@@ -362,6 +373,43 @@ public class RagTraceServiceImpl implements RagTraceService {
                 .avgLatencyMs((long) avgLatency)
                 .todayCount(todayCount)
                 .build();
+    }
+
+    /**
+     * 批量填充列表中每条 trace 的 userId 和 username。
+     */
+    private void fillUsernames(List<RagTraceListItem> items) {
+        // 收集所有有效的 conversationId
+        List<Long> conversationIds = items.stream()
+                .map(RagTraceListItem::getConversationId)
+                .filter(id -> id != null)
+                .distinct()
+                .toList();
+
+        if (conversationIds.isEmpty()) return;
+
+        // 批量查询会话 → userId 映射
+        List<ChatConversation> conversations = conversationMapper.selectBatchIds(conversationIds);
+        Map<Long, Long> convUserMap = conversations.stream()
+                .collect(Collectors.toMap(ChatConversation::getId, ChatConversation::getUserId, (a, b) -> a));
+
+        // 收集所有 userId
+        List<Long> userIds = convUserMap.values().stream().distinct().toList();
+        if (userIds.isEmpty()) return;
+
+        // 批量查询用户 → username 映射
+        List<SysUser> users = userMapper.selectBatchIds(userIds);
+        Map<Long, String> userMap = users.stream()
+                .collect(Collectors.toMap(SysUser::getId, SysUser::getUsername, (a, b) -> a));
+
+        // 回填
+        for (RagTraceListItem item : items) {
+            Long userId = convUserMap.get(item.getConversationId());
+            if (userId != null) {
+                item.setUserId(userId);
+                item.setUsername(userMap.get(userId));
+            }
+        }
     }
 
     private String extractQuestion(String inputJson) {

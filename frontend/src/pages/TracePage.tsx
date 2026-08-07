@@ -108,11 +108,11 @@ export function TracePage() {
           onChange: (p, s) => { setPageNo(p); setPageSize(s); } }}
         onRow={(r) => ({ onClick: () => setDetailId(r.id), style: { cursor: 'pointer' } })}
         columns={[
-          { title: 'ID', dataIndex: 'id', width: 80, ellipsis: true },
-          { title: '问题', dataIndex: 'question', width: 280, ellipsis: true, render: (v) => v ?? '-' },
-          { title: '意图', dataIndex: 'intent', width: 120, render: (v) => v ?? '-' },
-          { title: '状态', dataIndex: 'status', width: 100, render: (v: TraceStatus) => <StatusTag status={v} /> },
-          { title: '耗时', dataIndex: 'latencyMs', width: 100, render: formatMs },
+          { title: '问题', dataIndex: 'question', width: 240, ellipsis: true, render: (v) => v ?? '-' },
+          { title: '用户', dataIndex: 'username', width: 100, render: (v?: string) => v ?? '-' },
+          { title: '意图', dataIndex: 'intent', width: 100, render: (v) => v ?? '-' },
+          { title: '状态', dataIndex: 'status', width: 90, render: (v: TraceStatus) => <StatusTag status={v} /> },
+          { title: '耗时', dataIndex: 'latencyMs', width: 90, render: formatMs },
           { title: '时间', dataIndex: 'createdAt', width: 170, render: formatTime },
         ]}
       />

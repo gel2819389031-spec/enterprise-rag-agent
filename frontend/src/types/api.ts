@@ -240,6 +240,8 @@ export interface RagTraceListItem {
   question: string | null;
   intent: string | null;
   degraded: boolean;
+  userId?: string;
+  username?: string;
   createdAt: string;
 }
 
