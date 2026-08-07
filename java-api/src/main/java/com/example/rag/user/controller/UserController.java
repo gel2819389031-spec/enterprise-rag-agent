@@ -16,6 +16,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
+
 /**
  * 用户管理接口。
  */
@@ -30,11 +32,18 @@ public class UserController {
     private final UserService userService;
 
     /**
+     * 查询当前租户的用户列表。
+     */
+    @GetMapping
+    public ApiResult<List<UserResponse>> listUsers() {
+        return ApiResult.ok(userService.listUsers());
+    }
+
+    /**
      * 创建用户。
      */
     @PostMapping
     public ApiResult<UserResponse> createUser(@RequestBody UserCreateRequest request) {
-
         return ApiResult.ok(userService.createUser(request));
     }
 

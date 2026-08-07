@@ -25,5 +25,9 @@ public class KnowledgeBaseUpdateRequest {
      */
     private String visibility;
 
+    /**
+     * 入库流水线配置（切分策略 + 向量化参数）。可选，不传不更新。
+     */
+    private com.example.rag.ingestion.config.PipelineConfig pipelineConfig;
 
 }

@@ -1,12 +1,56 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, App, Button, Form, Input, Modal, Popconfirm, Select, Space, Table, Tag } from 'antd';
+import { Alert, App, Button, Collapse, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Table, Tag } from 'antd';
 import { DeleteOutlined, EditOutlined, PlusOutlined, RightOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { kbApi } from '../api/modules';
 import { PageHeader } from '../components/PageHeader';
-import type { KnowledgeBase } from '../types/api';
-type FormValue = Pick<KnowledgeBase, 'name' | 'description' | 'visibility'>;
+import type { KnowledgeBase, PipelineConfig } from '../types/api';
+
+const CHUNKER_OPTIONS = [
+  { value: 'recursive', label: '递归切分' },
+  { value: 'fixed', label: '固定长度切分' },
+  { value: 'paragraph', label: '段落切分' },
+];
+
+const EMBEDDING_MODELS = [
+  { value: 'text-embedding-v4', label: 'text-embedding-v4 (1536d)' },
+  { value: 'text-embedding-v3', label: 'text-embedding-v3 (1024d)' },
+];
+
+type FormValue = Pick<KnowledgeBase, 'name' | 'description' | 'visibility'> & {
+  chunkType: string;
+  chunkSize: number;
+  chunkOverlap: number;
+  embeddingModel: string;
+  embeddingDimension: number;
+  embeddingBatchSize: number;
+};
+
+/** 将表单值序列化为 PipelineConfig */
+function toPipelineConfig(v: FormValue): PipelineConfig {
+  return {
+    chunkType: v.chunkType || 'recursive',
+    chunkSize: v.chunkSize || 800,
+    chunkOverlap: v.chunkOverlap ?? 100,
+    embeddingModel: v.embeddingModel || undefined,
+    embeddingDimension: v.embeddingDimension || undefined,
+    embeddingBatchSize: v.embeddingBatchSize || undefined,
+  };
+}
+
+/** 将后端 PipelineConfig 反序列化为表单默认值 */
+function fromPipelineConfig(c?: PipelineConfig | null): Partial<FormValue> {
+  if (!c) return {};
+  return {
+    chunkType: c.chunkType ?? 'recursive',
+    chunkSize: c.chunkSize ?? 800,
+    chunkOverlap: c.chunkOverlap ?? 100,
+    embeddingModel: c.embeddingModel ?? '',
+    embeddingDimension: c.embeddingDimension ?? 1536,
+    embeddingBatchSize: c.embeddingBatchSize ?? 10,
+  };
+}
 export function KnowledgePage() {
   const nav = useNavigate(),
     qc = useQueryClient(),
@@ -27,12 +71,15 @@ export function KnowledgePage() {
     queryFn: () => kbApi.page({ pageNo: page, pageSize: 10, keyword: keyword || undefined }),
   });
   const save = useMutation({
-    mutationFn: (v: FormValue) => (editing ? kbApi.update(editing.id, v) : kbApi.create(v)),
+    mutationFn: (v: FormValue) => {
+      const payload = { ...v, pipelineConfig: toPipelineConfig(v) };
+      return editing ? kbApi.update(editing.id, payload) : kbApi.create(payload);
+    },
     onSuccess: (result) => {
       message.success(editing ? '知识库已更新' : '知识库已创建');
       setOpen(false);
       void qc.invalidateQueries({ queryKey: ['kb'] });
-      if (!editing) nav(`/knowledge/${result.id}/documents`);
+      if (!editing) nav(`/admin/knowledge/${result.id}/documents`);
     },
     onError: (error) => message.error(error.message),
   });
@@ -46,7 +93,13 @@ export function KnowledgePage() {
   });
   const show = (item?: KnowledgeBase) => {
     setEditing(item ?? null);
-    form.setFieldsValue(item ?? { name: '', description: '', visibility: 'PRIVATE' });
+    form.setFieldsValue({
+      name: '',
+      description: '',
+      visibility: 'PRIVATE',
+      ...item,
+      ...fromPipelineConfig(item?.chunkStrategy),
+    });
     setOpen(true);
   };
   return (
@@ -95,7 +148,7 @@ export function KnowledgePage() {
             title: '知识库',
             dataIndex: 'name',
             render: (v: string, r) => (
-              <Button type="link" onClick={() => nav(`/knowledge/${r.id}/documents`)}>
+              <Button type="link" onClick={() => nav(`/admin/knowledge/${r.id}/documents`)}>
                 {v}
               </Button>
             ),
@@ -123,7 +176,7 @@ export function KnowledgePage() {
               <Space>
                 <Button
                   icon={<RightOutlined />}
-                  onClick={() => nav(`/knowledge/${r.id}/documents`)}
+                  onClick={() => nav(`/admin/knowledge/${r.id}/documents`)}
                 >
                   文档
                 </Button>
@@ -158,6 +211,39 @@ export function KnowledgePage() {
               ]}
             />
           </Form.Item>
+          <Collapse
+            ghost
+            items={[{
+              key: 'pipeline',
+              label: '入库流水线配置',
+              children: (
+                <>
+                  <Form.Item name="chunkType" label="切分方式">
+                    <Select options={CHUNKER_OPTIONS} />
+                  </Form.Item>
+                  <Space style={{ width: '100%' }} size="middle">
+                    <Form.Item name="chunkSize" label="分块大小（字符）" style={{ flex: 1 }}>
+                      <InputNumber min={100} max={5000} step={50} style={{ width: '100%' }} />
+                    </Form.Item>
+                    <Form.Item name="chunkOverlap" label="重叠大小（字符）" style={{ flex: 1 }}>
+                      <InputNumber min={0} max={500} step={10} style={{ width: '100%' }} />
+                    </Form.Item>
+                  </Space>
+                  <Form.Item name="embeddingModel" label="Embedding 模型">
+                    <Select allowClear placeholder="留空使用全局默认" options={EMBEDDING_MODELS} />
+                  </Form.Item>
+                  <Space style={{ width: '100%' }} size="middle">
+                    <Form.Item name="embeddingDimension" label="向量维度" style={{ flex: 1 }}>
+                      <InputNumber min={128} max={4096} step={128} style={{ width: '100%' }} placeholder="留空使用默认" />
+                    </Form.Item>
+                    <Form.Item name="embeddingBatchSize" label="批处理大小" style={{ flex: 1 }}>
+                      <InputNumber min={1} max={50} style={{ width: '100%' }} placeholder="留空使用默认" />
+                    </Form.Item>
+                  </Space>
+                </>
+              ),
+            }]}
+          />
         </Form>
       </Modal>
     </>

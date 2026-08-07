@@ -59,6 +59,7 @@ public class IngestionTaskServiceImpl implements IngestionTaskService {
                 .status(IngestionTaskStatus.PENDING.getCode())
                 .progress(0)
                 .createdBy(command.getCreatedBy())
+                .pipelineConfig(command.getPipelineConfig())
                 .build();
         taskMapper.insert(task);
         initTaskSteps(task.getId());

@@ -1,10 +1,7 @@
-import { useEffect } from 'react';
 import { Navigate, Outlet, createBrowserRouter, RouterProvider } from 'react-router-dom';
-import { Spin } from 'antd';
-import { useQuery } from '@tanstack/react-query';
 import { useAuthStore } from '../stores/authStore';
-import { authApi } from '../api/modules';
 import { ConsoleLayout } from '../layouts/ConsoleLayout';
+import { AdminLayout } from '../layouts/AdminLayout';
 import { LoginPage } from '../pages/LoginPage';
 import { DashboardPage } from '../pages/DashboardPage';
 import { KnowledgePage } from '../pages/KnowledgePage';
@@ -13,38 +10,12 @@ import { ChatPage } from '../pages/ChatPage';
 import { TaskPage } from '../pages/TaskPage';
 import { TracePage } from '../pages/TracePage';
 import { RagEvaluationPage } from '../pages/RagEvaluationPage';
+import { ModelPage } from '../pages/ModelPage';
+import { SettingsPage } from '../pages/admin/SettingsPage';
 import { AdminRouteGuard } from './AdminRouteGuard';
-import { getDefaultPath } from '../utils/role';
 
 function Guard() {
   return useAuthStore((s) => s.accessToken) ? <Outlet /> : <Navigate to="/login" replace />;
-}
-
-/** 已登录用户按角色进入各自的默认页面。 */
-function HomeRedirect() {
-  const { user, setUser } = useAuthStore();
-  const currentUser = useQuery({
-    queryKey: ['auth', 'me'],
-    queryFn: authApi.me,
-    enabled: !user,
-    retry: false,
-  });
-
-  useEffect(() => {
-    if (currentUser.data) setUser(currentUser.data);
-  }, [currentUser.data, setUser]);
-
-  if (!user && currentUser.isPending) {
-    return (
-      <div className="route-loading">
-        <Spin size="large" />
-      </div>
-    );
-  }
-  if (currentUser.isError) return <Navigate to="/login" replace />;
-
-  const resolvedUser = user ?? currentUser.data;
-  return <Navigate to={resolvedUser ? getDefaultPath(resolvedUser) : '/login'} replace />;
 }
 
 const router = createBrowserRouter([
@@ -55,17 +26,25 @@ const router = createBrowserRouter([
       {
         element: <ConsoleLayout />,
         children: [
-          { index: true, element: <HomeRedirect /> },
-          { path: '/chat', element: <ChatPage /> },
+          { index: true, element: <ChatPage /> },
+          { path: 'chat', element: <ChatPage /> },
+        ],
+      },
+      {
+        path: 'admin',
+        element: <AdminRouteGuard />,
+        children: [
           {
-            element: <AdminRouteGuard />,
+            element: <AdminLayout />,
             children: [
-              { path: '/dashboard', element: <DashboardPage /> },
-              { path: '/knowledge', element: <KnowledgePage /> },
-              { path: '/knowledge/:knowledgeBaseId/documents', element: <DocumentsPage /> },
-              { path: '/tasks', element: <TaskPage /> },
-              { path: '/retrieval', element: <RagEvaluationPage /> },
-              { path: '/traces', element: <TracePage /> },
+              { index: true, element: <DashboardPage /> },
+              { path: 'knowledge', element: <KnowledgePage /> },
+              { path: 'knowledge/:knowledgeBaseId/documents', element: <DocumentsPage /> },
+              { path: 'tasks', element: <TaskPage /> },
+              { path: 'retrieval', element: <RagEvaluationPage /> },
+              { path: 'traces', element: <TracePage /> },
+              { path: 'models', element: <ModelPage /> },
+              { path: 'settings', element: <SettingsPage /> },
             ],
           },
         ],
@@ -73,6 +52,7 @@ const router = createBrowserRouter([
     ],
   },
 ]);
+
 export function AppRouter() {
   return <RouterProvider router={router} />;
 }

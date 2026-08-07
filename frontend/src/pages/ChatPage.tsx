@@ -1,39 +1,60 @@
-import { useEffect, useRef, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, App, Button, Empty, Input, List, Popconfirm, Select, Spin, Tag, Typography } from 'antd';
-import { DeleteOutlined, PlusOutlined, SendOutlined, StopOutlined } from '@ant-design/icons';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { App, Button, Select, Spin, Tag, Typography } from 'antd';
+import {
+  ArrowUpOutlined,
+  BookOutlined,
+  CheckCircleOutlined,
+  BulbOutlined,
+  RobotOutlined,
+  StopOutlined,
+} from '@ant-design/icons';
+import { useOutletContext, useSearchParams } from 'react-router-dom';
 import { chatApi, streamChat } from '../api/modules';
 import { MarkdownRenderer } from '../components/MarkdownRenderer';
 import type { ChatMessage } from '../types/api';
+
 interface LiveMessage {
   role: 'USER' | 'ASSISTANT';
   content: string;
   citations?: unknown[];
 }
+
+interface ChatContext {
+  conversationId?: string;
+}
+
+const PRESETS = [
+  { icon: <BookOutlined />, title: '内容总结', desc: '提炼 3-5 条关键信息与行动点', prompt: '请帮我总结以下内容，并列出3-5条要点：' },
+  { icon: <CheckCircleOutlined />, title: '任务拆解', desc: '把目标拆成可执行步骤与优先级', prompt: '请把下面需求拆解为步骤，并给出优先级和里程碑：' },
+  { icon: <BulbOutlined />, title: '灵感扩展', desc: '给出多个方案并比较优缺点', prompt: '围绕以下主题给出5-8个方案，并注明优缺点：' },
+];
+
 export function ChatPage() {
   const qc = useQueryClient(),
     { message } = App.useApp();
-  const [conversationId, setConversationId] = useState<string>(),
-    [question, setQuestion] = useState(''),
+  const { conversationId } = useOutletContext<ChatContext>();
+  const [, setSearchParams] = useSearchParams();
+
+  const [question, setQuestion] = useState(''),
     [knowledgeBaseId, setKnowledgeBaseId] = useState<string>(),
     [live, setLive] = useState<LiveMessage[]>([]),
     [streaming, setStreaming] = useState(false);
   const abort = useRef<AbortController>();
   const messagesRef = useRef<HTMLDivElement>(null);
-  const [convPage, setConvPage] = useState(1);
-  const conversations = useQuery({
-      queryKey: ['conversations', convPage],
-      queryFn: () => chatApi.conversations({ pageNo: convPage, pageSize: 50 }),
-    }),
-    kbs = useQuery({
-      queryKey: ['chat', 'knowledge-bases'],
-      queryFn: chatApi.availableKnowledgeBases,
-    }),
-    messages = useQuery({
-      queryKey: ['messages', conversationId],
-      queryFn: () => chatApi.messages(conversationId!),
-      enabled: Boolean(conversationId),
-    });
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  const kbs = useQuery({
+    queryKey: ['chat', 'knowledge-bases'],
+    queryFn: chatApi.availableKnowledgeBases,
+  });
+
+  const messages = useQuery({
+    queryKey: ['messages', conversationId],
+    queryFn: () => chatApi.messages(conversationId!),
+    enabled: Boolean(conversationId),
+  });
+
   useEffect(() => {
     setLive(
       (messages.data ?? []).map((m: ChatMessage) => ({
@@ -46,163 +67,173 @@ export function ChatPage() {
   useEffect(() => {
     const container = messagesRef.current;
     if (!container) return;
-
-    // 只滚动消息容器，避免 scrollIntoView 带动整个控制台页面。
-    container.scrollTo({
-      top: container.scrollHeight,
-      behavior: 'smooth',
-    });
+    container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
   }, [live]);
-  const remove = useMutation({
-    mutationFn: chatApi.remove,
-    onSuccess: () => {
-      setConversationId(undefined);
-      setLive([]);
-      void qc.invalidateQueries({ queryKey: ['conversations'] });
+
+  const doSend = useCallback(
+    async (text: string) => {
+      if (!text.trim() || streaming) return;
+      setQuestion('');
+      setLive((v) => [...v, { role: 'USER', content: text }, { role: 'ASSISTANT', content: '' }]);
+      setStreaming(true);
+      abort.current = new AbortController();
+      try {
+        await streamChat(
+          { question: text, conversationId, knowledgeBaseId },
+          (event, data) => {
+            const obj = typeof data === 'object' && data ? (data as Record<string, unknown>) : {};
+            if (event === 'delta' || obj.type === 'delta') {
+              const delta = String(obj.content ?? obj.delta ?? '');
+              setLive((v) =>
+                v.map((m, i) => (i === v.length - 1 ? { ...m, content: m.content + delta } : m)),
+              );
+            }
+            if (event === 'final' || obj.type === 'final') {
+              const answer = String(obj.answer ?? obj.content ?? '');
+              const nextId =
+                typeof obj.conversationId === 'string'
+                  ? obj.conversationId
+                  : typeof obj.conversationId === 'number'
+                    ? String(obj.conversationId)
+                    : undefined;
+              if (nextId) setSearchParams({ conversationId: nextId });
+              setLive((v) =>
+                v.map((m, i) =>
+                  i === v.length - 1
+                    ? { ...m, content: answer || m.content, citations: Array.isArray(obj.citations) ? obj.citations : undefined }
+                    : m,
+                ),
+              );
+            }
+            if (event === 'error') throw new Error(String(obj.message ?? '生成失败'));
+          },
+          abort.current.signal,
+        );
+        void qc.invalidateQueries({ queryKey: ['conversations'] });
+      } catch (e) {
+        if (!abort.current.signal.aborted) message.error(e instanceof Error ? e.message : '生成失败');
+      } finally {
+        setStreaming(false);
+      }
     },
-  });
-  const send = async () => {
-    const text = question.trim();
-    if (!text || streaming) return;
-    setQuestion('');
-    setLive((v) => [...v, { role: 'USER', content: text }, { role: 'ASSISTANT', content: '' }]);
-    setStreaming(true);
-    abort.current = new AbortController();
-    try {
-      await streamChat(
-        { question: text, conversationId, knowledgeBaseId },
-        (event, data) => {
-          const obj = typeof data === 'object' && data ? (data as Record<string, unknown>) : {};
-          if (event === 'delta' || obj.type === 'delta') {
-            const delta = String(obj.content ?? obj.delta ?? '');
-            setLive((v) =>
-              v.map((m, i) => (i === v.length - 1 ? { ...m, content: m.content + delta } : m)),
-            );
-          }
-          if (event === 'final' || obj.type === 'final') {
-            const answer = String(obj.answer ?? obj.content ?? '');
-            const nextId =
-              typeof obj.conversationId === 'string'
-                ? obj.conversationId
-                : typeof obj.conversationId === 'number'
-                  ? String(obj.conversationId)
-                  : undefined;
-            if (nextId) setConversationId(nextId);
-            setLive((v) =>
-              v.map((m, i) =>
-                i === v.length - 1
-                  ? {
-                      ...m,
-                      content: answer || m.content,
-                      citations: Array.isArray(obj.citations) ? obj.citations : undefined,
-                    }
-                  : m,
-              ),
-            );
-          }
-          if (event === 'error') throw new Error(String(obj.message ?? '生成失败'));
-        },
-        abort.current.signal,
-      );
-      void qc.invalidateQueries({ queryKey: ['conversations'] });
-    } catch (e) {
-      if (!abort.current.signal.aborted) message.error(e instanceof Error ? e.message : '生成失败');
-    } finally {
-      setStreaming(false);
+    [streaming, conversationId, knowledgeBaseId, setSearchParams, qc, message],
+  );
+
+  const handleSend = () => doSend(question);
+  const handlePreset = (prompt: string) => doSend(prompt);
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
     }
   };
+
+  const hasMessages = live.length > 0;
+
+  const adjustTextarea = () => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+  };
+
+  useLayoutEffect(() => { adjustTextarea(); }, [question]);
+
+  const renderComposer = () => (
+    <div className="chat-composer">
+      <textarea
+        ref={inputRef}
+        className="composer-textarea"
+        rows={3}
+        value={question}
+        onChange={(e) => setQuestion(e.target.value)}
+        onKeyDown={handleKeyDown}
+        placeholder="输入问题，Enter 发送，Shift + Enter 换行"
+      />
+      <Button
+        type="primary"
+        shape="circle"
+        size="small"
+        icon={streaming ? <StopOutlined /> : <ArrowUpOutlined />}
+        onClick={() => (streaming ? abort.current?.abort() : handleSend())}
+        disabled={!question.trim() && !streaming}
+        className="composer-send-btn"
+      />
+    </div>
+  );
+
   return (
-    <div className="chat-workspace">
-      <aside className="conversation-panel">
-        <Button
-          block
-          type="primary"
-          icon={<PlusOutlined />}
-          onClick={() => {
-            abort.current?.abort();
-            setConversationId(undefined);
-            setLive([]);
-          }}
-        >
-          新建对话
-        </Button>
-        <List
-          dataSource={conversations.data?.records}
-          loading={conversations.isLoading}
-          renderItem={(item) => (
-            <List.Item
-              className={conversationId === item.id ? 'active' : ''}
-              onClick={() => setConversationId(item.id)}
-              actions={[
-                <Popconfirm key="d" title="删除会话？" onConfirm={() => remove.mutate(item.id)}>
-                  <DeleteOutlined />
-                </Popconfirm>,
-              ]}
-            >
-              <Typography.Text ellipsis>{item.title || '未命名对话'}</Typography.Text>
-            </List.Item>
-          )}
-          loadMore={
-            (conversations.data?.total ?? 0) > convPage * 50 ? (
-              <Button block type="link" loading={conversations.isFetching}
-                onClick={() => setConvPage((p) => p + 1)}>
-                加载更多
-              </Button>
-            ) : undefined
-          }
-        />
-      </aside>
-      <section className="chat-main">
-        {kbs.isError && (
-          <Alert banner type="warning" message="知识库列表暂不可用，仍可进行基础对话" />
-        )}
+    <div className="chat-main-area">
+      {hasMessages && (
         <div className="chat-toolbar">
-          <Select
-            allowClear
-            placeholder="选择知识库"
-            value={knowledgeBaseId}
-            onChange={setKnowledgeBaseId}
-            options={kbs.data?.map((k) => ({ value: k.id, label: k.name }))}
-            style={{ width: 260 }}
-          />
-          <Tag color="blue">RAG 模式</Tag>
+          <div className="chat-toolbar-inner">
+            <Select
+              allowClear
+              placeholder="选择知识库"
+              value={knowledgeBaseId}
+              onChange={setKnowledgeBaseId}
+              options={kbs.data?.map((k) => ({ value: k.id, label: k.name }))}
+              style={{ width: 260 }}
+              variant="borderless"
+            />
+            <Tag color="blue">RAG</Tag>
+          </div>
         </div>
-        <div ref={messagesRef} className="messages">
-          {live.length === 0 ? (
-            <Empty description="选择知识库，开始一次有依据的对话" />
-          ) : (
-            live.map((m, i) => (
+      )}
+
+      <div ref={messagesRef} className={`chat-messages ${!hasMessages ? 'chat-messages--welcome' : ''}`}>
+        {!hasMessages ? (
+          <div className="chat-welcome">
+            <div className="welcome-top">
+              <div className="welcome-icon">
+                <RobotOutlined />
+              </div>
+              <Typography.Title level={2} className="welcome-title">
+                我是 Nexus RAG
+              </Typography.Title>
+              <Typography.Text className="welcome-desc">
+                基于知识库的智能问答助手
+              </Typography.Text>
+            </div>
+
+            <div className="welcome-presets">
+              {PRESETS.map((p) => (
+                <div key={p.title} className="preset-card" onClick={() => handlePreset(p.prompt)}>
+                  <div className="preset-icon">{p.icon}</div>
+                  <div className="preset-body">
+                    <Typography.Text strong className="preset-title">{p.title}</Typography.Text>
+                    <Typography.Text type="secondary" className="preset-desc">{p.desc}</Typography.Text>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="welcome-input">
+              {renderComposer()}
+            </div>
+          </div>
+        ) : (
+          <div className="chat-messages-inner">
+            {live.map((m, i) => (
               <div key={i} className={`message ${m.role.toLowerCase()}`}>
-                <div className="message-role">{m.role === 'USER' ? '你' : 'Nexus'}</div>
+                {m.role === 'USER' && <div className="message-role">你</div>}
                 <div className="message-body">
                   {m.content ? <MarkdownRenderer content={m.content} /> : <Spin size="small" />}
                   {m.citations && <div className="citations">引用来源 {m.citations.length} 条</div>}
                 </div>
               </div>
-            ))
-          )}
+            ))}
+          </div>
+        )}
+      </div>
+
+      {hasMessages && (
+        <div className="chat-composer-wrapper">
+          <div className="chat-composer-inner">
+            {renderComposer()}
+          </div>
         </div>
-        <div className="composer">
-          <Input.TextArea
-            autoSize={{ minRows: 2, maxRows: 6 }}
-            value={question}
-            onChange={(e) => setQuestion(e.target.value)}
-            onPressEnter={(e) => {
-              if (!e.shiftKey) {
-                e.preventDefault();
-                void send();
-              }
-            }}
-            placeholder="输入问题，Enter 发送，Shift + Enter 换行"
-          />
-          <Button
-            type="primary"
-            shape="circle"
-            icon={streaming ? <StopOutlined /> : <SendOutlined />}
-            onClick={() => (streaming ? abort.current?.abort() : void send())}
-          />
-        </div>
-      </section>
+      )}
     </div>
   );
 }

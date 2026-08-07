@@ -1,0 +1,14 @@
+package com.example.rag.model.dto;
+
+import lombok.Data;
+
+@Data
+public class ModelConfigCreateRequest {
+    private Long providerId;
+    private String modelCode;
+    private String modelName;
+    private String modelType;
+    private String parameters;
+    private Boolean isDefault;
+    private Integer status;
+}

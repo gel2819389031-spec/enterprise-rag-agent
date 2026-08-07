@@ -17,11 +17,15 @@ import type {
   IngestionTaskStep,
   KnowledgeBase,
   KnowledgeDocument,
+  ModelConfig,
+  ModelProvider,
+  ModelType,
   PageResult,
+  PipelineConfig,
   TokenResponse,
 } from '../types/api';
 export const authApi = {
-  login: (v: { tenantCode: string; username: string; password: string }) =>
+  login: (v: { username: string; password: string }) =>
     http.post<never, TokenResponse>('/api/auth/login', v),
   me: () => http.get<never, CurrentUser>('/api/auth/me'),
   logout: (refreshToken: string) => http.post('/api/auth/logout', { refreshToken }),
@@ -30,9 +34,13 @@ export const kbApi = {
   page: (p: { keyword?: string; pageNo: number; pageSize: number }) =>
     http.get<never, PageResult<KnowledgeBase>>('/api/knowledge-bases', { params: p }),
   get: (id: string) => http.get<never, KnowledgeBase>(`/api/knowledge-bases/${id}`),
-  create: (v: Pick<KnowledgeBase, 'name' | 'description' | 'visibility'>) =>
+  create: (v: Pick<KnowledgeBase, 'name' | 'description' | 'visibility'> & {
+    pipelineConfig?: PipelineConfig;
+  }) =>
     http.post<never, KnowledgeBase>('/api/knowledge-bases', v),
-  update: (id: string, v: Partial<KnowledgeBase>) =>
+  update: (id: string, v: Partial<KnowledgeBase> & {
+    pipelineConfig?: PipelineConfig;
+  }) =>
     http.patch<never, KnowledgeBase>(`/api/knowledge-bases/${id}`, v),
   remove: (id: string) => http.delete(`/api/knowledge-bases/${id}`),
 };
@@ -48,11 +56,15 @@ export const documentApi = {
       // 文档解析和模型调用属于长耗时操作，单独放宽为 10 分钟。
       timeout: 10 * 60 * 1000,
     }),
-  upload: (kbId: string, files: File[], onProgress: (n: number) => void) => {
+  upload: (kbId: string, files: File[], onProgress: (n: number) => void,
+           pipelineConfig?: PipelineConfig) => {
     const data = new FormData();
     data.append('knowledgeBaseId', kbId);
     // 多个文件使用同一个 file 字段名，后端接收为 List<MultipartFile>。
     files.forEach((file) => data.append('file', file));
+    if (pipelineConfig) {
+      data.append('pipelineConfig', JSON.stringify(pipelineConfig));
+    }
     return http.post<never, KnowledgeDocument[]>('/api/documents/upload', data, {
       onUploadProgress: (e) => onProgress(e.total ? Math.round((e.loaded / e.total) * 100) : 0),
       timeout: 10 * 60 * 1000,
@@ -80,12 +92,45 @@ export const chatApi = {
     http.get<never, ChatMessage[]>(`/api/chat/conversations/${id}/messages`),
   remove: (id: string) => http.delete(`/api/chat/conversations/${id}`),
 };
+export const userApi = {
+  list: () => http.get<never, import('../types/api').UserInfo[]>('/api/users'),
+  create: (v: { username: string; password: string; displayName?: string; roleCode: string }) =>
+    http.post<never, import('../types/api').UserInfo>('/api/users', v),
+  disable: (id: string) => http.patch(`/api/users/${id}/disable`),
+};
+
 export const traceApi = {
   list: (params: { status?: string; keyword?: string; conversationId?: string; pageNo: number; pageSize: number }) =>
     http.get<never, PageResult<import('../types/api').RagTraceListItem>>('/api/rag/traces', { params }),
   get: (id: string) => http.get<never, import('../types/api').RagTraceDetail>(`/api/rag/traces/${id}`),
   statistics: () => http.get<never, import('../types/api').RagTraceStatistics>('/api/rag/traces/statistics'),
 };
+export const modelApi = {
+  // Provider
+  createProvider: (v: Partial<ModelProvider>) =>
+    http.post<never, ModelProvider>('/api/model-providers', v),
+  updateProvider: (id: string, v: Partial<ModelProvider>) =>
+    http.patch<never, ModelProvider>(`/api/model-providers/${id}`, v),
+  deleteProvider: (id: string) =>
+    http.delete(`/api/model-providers/${id}`),
+  listProviders: (params: { keyword?: string; pageNo: number; pageSize: number }) =>
+    http.get<never, PageResult<ModelProvider>>('/api/model-providers', { params }),
+  listProvidersAvailable: () =>
+    http.get<never, ModelProvider[]>('/api/model-providers/available'),
+  // Config
+  createConfig: (v: Partial<ModelConfig>) =>
+    http.post<never, ModelConfig>('/api/model-configs', v),
+  updateConfig: (id: string, v: Partial<ModelConfig>) =>
+    http.patch<never, ModelConfig>(`/api/model-configs/${id}`, v),
+  deleteConfig: (id: string) =>
+    http.delete(`/api/model-configs/${id}`),
+  listConfigs: (params: { providerId?: string; modelType?: string; keyword?: string; pageNo: number; pageSize: number }) =>
+    http.get<never, PageResult<ModelConfig>>('/api/model-configs', { params }),
+  // 公开接口
+  listByType: (type: ModelType) =>
+    http.get<never, ModelConfig[]>(`/api/models?type=${type}`),
+};
+
 export const streamChat = async (
   request: ChatRequest,
   onEvent: (event: string, data: unknown) => void,

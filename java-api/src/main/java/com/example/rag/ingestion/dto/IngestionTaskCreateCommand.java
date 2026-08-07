@@ -29,4 +29,9 @@ public class IngestionTaskCreateCommand {
      * 创建人用户 ID。
      */
     private Long createdBy;
+
+    /**
+     * 冻结到任务的流水线配置。由上传链路传入（KB 默认值合并上传覆盖后的结果）。
+     */
+    private com.example.rag.ingestion.config.PipelineConfig pipelineConfig;
 }

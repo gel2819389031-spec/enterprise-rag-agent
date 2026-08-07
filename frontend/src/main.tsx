@@ -14,13 +14,49 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       <ConfigProvider
         theme={{
           token: {
-            colorPrimary: '#4f5bd5',
-            borderRadius: 6,
-            fontFamily: 'Inter,Segoe UI,Microsoft YaHei,sans-serif',
+            colorPrimary: '#4F5BD5',
+            borderRadius: 8,
+            borderRadiusLG: 12,
+            fontFamily: 'Inter, "Segoe UI", "Microsoft YaHei", sans-serif',
+            colorBgContainer: '#FFFFFF',
+            colorBorderSecondary: '#E8ECF2',
+            colorText: '#172033',
+            colorTextSecondary: '#64748B',
+            fontSize: 14,
+            controlHeightLG: 44,
           },
           components: {
-            Layout: { bodyBg: '#f4f6fa', siderBg: '#111827' },
-            Table: { headerBg: '#f8fafc' },
+            Layout: {
+              bodyBg: '#F5F6FA',
+              siderBg: '#0B1120',
+              headerBg: '#FFFFFF',
+            },
+            Menu: {
+              darkItemBg: '#0B1120',
+              darkItemSelectedBg: 'rgba(79, 91, 213, 0.15)',
+              darkItemHoverBg: 'rgba(255, 255, 255, 0.04)',
+              itemBorderRadius: 8,
+              darkItemColor: '#94A3B8',
+              darkItemSelectedColor: '#FFFFFF',
+            },
+            Card: {
+              borderRadiusLG: 12,
+              boxShadowTertiary: '0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.06)',
+            },
+            Table: {
+              headerBg: '#F8FAFC',
+              headerBorderRadius: 8,
+            },
+            Button: {
+              borderRadius: 8,
+              controlHeightLG: 44,
+            },
+            Input: {
+              borderRadius: 8,
+            },
+            Select: {
+              borderRadius: 8,
+            },
           },
         }}
       >

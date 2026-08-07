@@ -1,5 +1,6 @@
 package com.example.rag.knowledge.dto;
 
+import com.example.rag.ingestion.config.PipelineConfig;
 import lombok.Data;
 
 /**
@@ -21,5 +22,9 @@ public class KnowledgeBaseCreateRequest {
      */
     private String visibility;
 
+    /**
+     * 入库流水线配置（切分策略 + 向量化参数）。可选，不传使用默认值。
+     */
+    private PipelineConfig pipelineConfig;
 
 }

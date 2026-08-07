@@ -27,6 +27,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.List;
 
 import static com.rometools.utils.Strings.isBlank;
 
@@ -52,12 +53,10 @@ public class UserServiceImpl implements UserService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public UserResponse createUser(UserCreateRequest request) {
-        // 校验创建用户请求中的必填字段，避免空值进入数据库。
+        // 校验必填字段。
         validateCreateUser(request);
-        // 校验当前操作者能否访问目标租户。
-        tenantAccessGuard.checkTenant(
-                request.getTenantId()
-        );
+        // 自动继承当前操作者的租户 ID。
+        Long tenantId = currentUserProvider.requireTenantId();
         // 解析并校验目标用户角色。
         UserRole targetRole =
                 UserRole.fromCode(
@@ -68,7 +67,7 @@ public class UserServiceImpl implements UserService {
                 UserRole.fromCode(
                         currentUserProvider.requireRole()
                 );
-        // 租户管理员只能创建普通用户。
+        // ADMIN（租户管理员）只能创建 USER（普通用户）。
         if (currentRole == UserRole.ADMIN
                 && targetRole != UserRole.USER) {
             throw new ClientException(
@@ -76,7 +75,7 @@ public class UserServiceImpl implements UserService {
                     "租户管理员只能创建普通用户"
             );
         }
-        // 只有平台管理员可以创建平台管理员。
+        // 只有 PLATFORM_ADMIN 可以创建 PLATFORM_ADMIN。
         if (targetRole == UserRole.PLATFORM_ADMIN
                 && currentRole != UserRole.PLATFORM_ADMIN) {
             throw new ClientException(
@@ -86,17 +85,17 @@ public class UserServiceImpl implements UserService {
         }
         SysUser user;
         try {
-            // 查询租户是否存在，避免用户绑定到不存在的租户。
-            tenantService.getTenant(request.getTenantId());
-            // 创建前检查同一租户下用户名是否已存在。
-            ensureUsernameNotExists(request.getTenantId(), request.getUsername());
+            // 确保目标租户存在。
+            tenantService.getTenant(tenantId);
+            // 同一租户下用户名唯一。
+            ensureUsernameNotExists(tenantId, request.getUsername());
             String passwordHash =
                     passwordEncoder.encode(
                             request.getPassword()
                     );
             user = SysUser.builder()
                     .id(idGenerator.nextId())
-                    .tenantId(request.getTenantId())
+                    .tenantId(tenantId)
                     .username(request.getUsername())
                     .displayName(request.getDisplayName())
                     .email(request.getEmail())
@@ -107,9 +106,7 @@ public class UserServiceImpl implements UserService {
                     .passwordHash(passwordHash)
                     .passwordChangedAt(Instant.now())
                     .build();
-            // 调用 Mapper 将用户记录写入数据库。
             userMapper.insert(user);
-            // 打印创建成功日志，方便按用户 ID、租户 ID 或用户名排查链路。
             log.info("User created, userId={}, tenantId={}, username={}",
                     user.getId(), user.getTenantId(), user.getUsername());
 
@@ -118,15 +115,15 @@ public class UserServiceImpl implements UserService {
             return userResponse;
         } catch (DuplicateKeyException ex) {
             log.warn("Create user failed because username already exists, tenantId={}, username={}",
-                    request.getTenantId(), request.getUsername(), ex);
+                    tenantId, request.getUsername(), ex);
             throw new BusinessException(BaseErrorCode.BAD_REQUEST, "当前租户下用户名已存在");
         } catch (DataIntegrityViolationException ex) {
             log.warn("Create user failed because user data violates database constraint, tenantId={}, username={}",
-                    request.getTenantId(), request.getUsername(), ex);
-            throw new ClientException(BaseErrorCode.BAD_REQUEST, "用户数据不满足数据库约束，请检查租户 ID、必填字段、字段长度或唯一约束");
+                    tenantId, request.getUsername(), ex);
+            throw new ClientException(BaseErrorCode.BAD_REQUEST, "用户数据不满足数据库约束");
         } catch (DataAccessException ex) {
             log.error("Create user failed because database access error, tenantId={}, username={}",
-                    request.getTenantId(), request.getUsername(), ex);
+                    tenantId, request.getUsername(), ex);
             throw new DatabaseException("创建用户失败，请稍后再试", ex);
         }
     }
@@ -178,6 +175,28 @@ public class UserServiceImpl implements UserService {
     }
 
     /**
+     * 查询当前租户下的所有用户。
+     */
+    @Override
+    public List<UserResponse> listUsers() {
+        Long tenantId = currentUserProvider.requireTenantId();
+        try {
+            List<SysUser> users = userMapper.selectList(
+                    new LambdaQueryWrapper<SysUser>()
+                            .eq(SysUser::getTenantId, tenantId)
+            );
+            return users.stream().map(u -> {
+                UserResponse r = new UserResponse();
+                BeanUtils.copyProperties(u, r);
+                return r;
+            }).toList();
+        } catch (DataAccessException ex) {
+            log.error("List users failed, tenantId={}", tenantId, ex);
+            throw new DatabaseException("查询用户列表失败", ex);
+        }
+    }
+
+    /**
      * 禁用用户账号，不删除历史业务数据。
      */
     @Override
@@ -212,9 +231,6 @@ public class UserServiceImpl implements UserService {
     private void validateCreateUser(UserCreateRequest request ) {
         if (request == null) {
             throw new ClientException(BaseErrorCode.BAD_REQUEST, "用户信息不能为空");
-        }
-        if (request.getTenantId() == null) {
-            throw new ClientException(BaseErrorCode.BAD_REQUEST, "租户 ID tenantId 不能为空");
         }
         if (isBlank(request.getUsername())) {
             throw new ClientException(BaseErrorCode.BAD_REQUEST, "用户名 username 不能为空");

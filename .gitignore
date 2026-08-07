@@ -1,16 +1,58 @@
+# ── Java ──
 target/
-.idea/
-.vscode/
+*.class
+*.jar
+*.war
 *.iml
-*.log
-.env
-.DS_Store
-__pycache__/
-*.pyc
-.pytest_cache/
+
+# ── Node / Frontend ──
+node_modules/
 frontend/node_modules/
 frontend/dist/
 frontend/.env.local
 frontend/*.tsbuildinfo
+
+# ── Python ──
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+.pytest_cache/
+python-api/venv/
+python-api/.venv/
+
+# ── IDE ──
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ── OS ──
+.DS_Store
+Thumbs.db
+
+# ── Secrets & Config ──
+.env
+.env.*
 secrets/
 *.pem
+*.key
+
+# ── Logs & Temp ──
+*.log
+*.tmp
+logs/
+
+# ── Docs (not code) ──
+docs/
+
+# ── Data ──
+data/
+uploads/
+python-api/evaluation/datasets/
+
+# ── Root accidentals ──
+/package.json
+/package-lock.json
+/node_modules/

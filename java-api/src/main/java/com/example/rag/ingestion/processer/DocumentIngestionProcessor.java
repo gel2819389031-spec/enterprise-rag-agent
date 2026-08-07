@@ -44,10 +44,18 @@ import java.util.function.Supplier;
 @RequiredArgsConstructor
 public class DocumentIngestionProcessor {
 
+    /**
+     * @deprecated 改为从 ingestion_task.pipeline_config 读取，常量仅用作 fallback。
+     */
+    @Deprecated
     private static final int DEFAULT_CHUNK_SIZE = 800;
 
+    /** @deprecated */
+    @Deprecated
     private static final int DEFAULT_OVERLAP = 100;
 
+    /** @deprecated */
+    @Deprecated
     private static final String DEFAULT_CHUNKER_TYPE = "recursive";
 
     private final IngestionTaskService ingestionTaskService;
@@ -106,16 +114,20 @@ public class DocumentIngestionProcessor {
                 IngestionStepCode.PARSE_DOCUMENT,
                 () -> parseDocument(document)
         );
-        // 第二阶段：清洗文本并执行分块。
+        // 第二阶段：清洗文本并执行分块（使用任务配置）。
+        com.example.rag.ingestion.config.PipelineConfig pipelineConfig =
+                task.getPipelineConfig() != null
+                        ? task.getPipelineConfig()
+                        : com.example.rag.ingestion.config.PipelineConfig.defaults();
         List<TextChunk> chunks = executeTrackedStep(
                 taskId,
                 IngestionStepCode.SPLIT_CHUNK,
-                () -> splitDocument(parsedDocument)
+                () -> splitDocument(parsedDocument, pipelineConfig)
         );
 
         // 获取实际使用的分块器，用于保存分块元数据。
         TextChunker chunker =
-                textChunkerFactory.getChunker(DEFAULT_CHUNKER_TYPE);
+                textChunkerFactory.getChunker(pipelineConfig.getChunkType());
         // 第三阶段：将分块保存到 PostgreSQL。
         executeTrackedStep(
                 taskId,
@@ -137,21 +149,33 @@ public class DocumentIngestionProcessor {
      * 清洗解析文本并执行切分。
      */
     private List<TextChunk> splitDocument(
-            ParsedDocument parsedDocument
+            ParsedDocument parsedDocument,
+            com.example.rag.ingestion.config.PipelineConfig config
     ) {
         // 对解析文本进行换行、空白字符等标准化。
         String normalizedText =
                 textNormalizer.normalize(parsedDocument.getText());
 
+        // 从任务流水线配置读取切分参数，缺失字段 fallback 到默认值。
+        String chunkerType = config.getChunkType() != null
+                ? config.getChunkType()
+                : DEFAULT_CHUNKER_TYPE;
+        int chunkSize = config.getChunkSize() != null && config.getChunkSize() > 0
+                ? config.getChunkSize()
+                : DEFAULT_CHUNK_SIZE;
+        int overlap = config.getChunkOverlap() != null && config.getChunkOverlap() >= 0
+                ? config.getChunkOverlap()
+                : DEFAULT_OVERLAP;
+
         // 根据配置取得对应的分块器。
         TextChunker chunker =
-                textChunkerFactory.getChunker(DEFAULT_CHUNKER_TYPE);
+                textChunkerFactory.getChunker(chunkerType);
 
         // 执行文本切分。
         return chunker.chunk(
                 normalizedText,
-                DEFAULT_CHUNK_SIZE,
-                DEFAULT_OVERLAP
+                chunkSize,
+                overlap
         );
     }
 

@@ -1,13 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Button, Card, Checkbox, Form, Input, Typography, App, Spin } from 'antd';
-import { LockOutlined, RobotOutlined, TeamOutlined, UserOutlined } from '@ant-design/icons';
+import { LockOutlined, RobotOutlined, UserOutlined } from '@ant-design/icons';
 import { useMutation } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { authApi } from '../api/modules';
 import { useAuthStore } from '../stores/authStore';
-import { getDefaultPath } from '../utils/role';
 interface LoginValues {
-  tenantCode: string;
   username: string;
   password: string;
   remember: boolean;
@@ -30,7 +28,7 @@ export function LoginPage() {
       .then((user) => {
         if (!cancelled) {
           setUser(user);
-          nav(getDefaultPath(user), { replace: true });
+          nav('/', { replace: true });
         }
       })
       .catch(() => {
@@ -54,7 +52,7 @@ export function LoginPage() {
         const user = await authApi.me();
         setUser(user);
         message.success('登录成功');
-        nav(getDefaultPath(user));
+        nav('/');
       } catch {
         clear();
         message.error('登录状态验证失败，请重新登录');
@@ -85,22 +83,19 @@ export function LoginPage() {
           让企业知识从文档沉淀，走向可信、可追溯的智能回答。
         </Typography.Paragraph>
         <div className="signal-grid">
-          <span>知识入库</span>
-          <span>混合检索</span>
-          <span>引用溯源</span>
+          <span>📄 知识入库</span>
+          <span>🔍 混合检索</span>
+          <span>📎 引用溯源</span>
         </div>
       </section>
       <Card className="login-panel" variant="borderless">
-        <Typography.Title level={2}>欢迎回来</Typography.Title>
+        <Typography.Title level={2} style={{ fontWeight: 700 }}>欢迎回来</Typography.Title>
         <Typography.Paragraph type="secondary">登录企业知识智能平台</Typography.Paragraph>
         <Form<LoginValues>
           layout="vertical"
           initialValues={{ remember: true }}
           onFinish={(v) => login.mutate(v)}
         >
-          <Form.Item label="租户编码" name="tenantCode" rules={[{ required: true }]}>
-            <Input size="large" prefix={<TeamOutlined />} />
-          </Form.Item>
           <Form.Item label="用户名" name="username" rules={[{ required: true }]}>
             <Input size="large" prefix={<UserOutlined />} />
           </Form.Item>

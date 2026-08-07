@@ -24,6 +24,18 @@ export interface TokenResponse {
   displayName: string;
   role: string;
 }
+export interface UserInfo {
+  id: string;
+  tenantId: string;
+  username: string;
+  displayName?: string;
+  email?: string;
+  roleCode: string;
+  status: number;
+  lastLoginAt?: string;
+  createdAt: string;
+}
+
 export interface CurrentUser {
   userId: string;
   tenantId: string;
@@ -56,6 +68,16 @@ export type MessageRole = 'USER' | 'ASSISTANT' | 'SYSTEM';
 
 // --- 实体类型 ---
 
+/** 入库流水线配置——对应后端 PipelineConfig 实体。 */
+export interface PipelineConfig {
+  chunkType?: string;
+  chunkSize?: number;
+  chunkOverlap?: number;
+  embeddingModel?: string;
+  embeddingDimension?: number;
+  embeddingBatchSize?: number;
+}
+
 export interface KnowledgeBase {
   id: string;
   tenantId: string;
@@ -63,7 +85,8 @@ export interface KnowledgeBase {
   description?: string;
   visibility: KnowledgeBaseVisibility;
   embeddingModelConfigId?: string;
-  chunkStrategy?: string;
+  /** 流水线配置 JSON 对象，可能为 null（旧数据）或空对象。 */
+  chunkStrategy?: PipelineConfig | null;
   status: number;
   documentCount: number;
   createdBy: string;
@@ -269,4 +292,31 @@ export interface RagTraceQuery {
   conversationId?: string;
   pageNo: number;
   pageSize: number;
+}
+
+// --- 模型管理 ---
+
+export type ModelType = 'EMBEDDING' | 'LLM' | 'RERANK';
+
+export interface ModelProvider {
+  id: string;
+  tenantId?: string | null;
+  providerCode: string;
+  providerName: string;
+  endpoint?: string;
+  authType: string;
+  status: number;
+}
+
+export interface ModelConfig {
+  id: string;
+  tenantId?: string | null;
+  providerId: string;
+  providerName?: string;
+  modelCode: string;
+  modelName: string;
+  modelType: ModelType;
+  parameters?: string;
+  isDefault: boolean;
+  status: number;
 }

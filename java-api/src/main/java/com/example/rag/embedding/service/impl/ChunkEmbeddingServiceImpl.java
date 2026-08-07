@@ -85,29 +85,49 @@ public class ChunkEmbeddingServiceImpl implements ChunkEmbeddingService {
     }
 
     /**
-     * 对单个批次的 Chunk 执行向量化并写入数据库。
-     * 不含任务状态管理，供流水线 EmbedStep 调用。
+     * 对单个批次的 Chunk 执行向量化并写入数据库（使用全局默认模型）。
      */
     @Override
     public int embedBatch(
             List<KnowledgeDocumentChunk> batch
+    ) {
+        return embedBatch(batch, properties.getModel(), properties.getDimension());
+    }
+
+    /**
+     * 对单个批次的 Chunk 执行向量化并写入数据库（使用指定模型和维度）。
+     */
+    @Override
+    public int embedBatch(
+            List<KnowledgeDocumentChunk> batch,
+            String model,
+            int dimension
     ) {
         // 提取当前批次文本。
         List<String> texts = batch.stream()
                 .map(KnowledgeDocumentChunk::getContent)
                 .toList();
 
+        // 确定实际使用的模型名和维度：传入值有效则用传入值，否则用全局默认。
+        String effectiveModel = model != null && !model.isBlank()
+                ? model
+                : properties.getModel();
+        int effectiveDimension = dimension > 0
+                ? dimension
+                : properties.getDimension();
+
         // 调用 Python，不开启数据库事务。
         EmbeddingData data =
                 embeddingClient.embed(
                         texts,
-                        properties.getModel()
+                        effectiveModel
                 );
 
         // 校验 Python 返回数量、下标和向量维度。
         validateEmbeddingData(
                 data,
-                batch.size()
+                batch.size(),
+                effectiveDimension
         );
 
         // 只在写数据库时开启独立短事务。
@@ -126,12 +146,12 @@ public class ChunkEmbeddingServiceImpl implements ChunkEmbeddingService {
             embedBatch(chunks.subList(start, end));
         }
     }
-    private void validateEmbeddingData(EmbeddingData data, int expectedSize) {
+    private void validateEmbeddingData(EmbeddingData data, int expectedSize, int expectedDimension) {
         if (data == null) {
             throw new BusinessException(BaseErrorCode.SERVICE_ERROR, "Embedding 响应为空");
         }
 
-        if (!properties.getDimension().equals(data.getDimension())) {
+        if (expectedDimension > 0 && !Integer.valueOf(expectedDimension).equals(data.getDimension())) {
             throw new BusinessException(BaseErrorCode.SERVICE_ERROR, "Embedding 维度不匹配");
         }
 
@@ -144,7 +164,8 @@ public class ChunkEmbeddingServiceImpl implements ChunkEmbeddingService {
                 throw new BusinessException(BaseErrorCode.SERVICE_ERROR, "Embedding 下标非法");
             }
 
-            if (item.getEmbedding() == null || item.getEmbedding().size() != properties.getDimension()) {
+            if (item.getEmbedding() == null
+                    || (expectedDimension > 0 && item.getEmbedding().size() != expectedDimension)) {
                 throw new BusinessException(BaseErrorCode.SERVICE_ERROR, "Embedding 向量维度不匹配");
             }
         }

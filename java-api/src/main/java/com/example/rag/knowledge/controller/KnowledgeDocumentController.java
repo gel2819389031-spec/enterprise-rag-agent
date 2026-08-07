@@ -42,14 +42,16 @@ public class KnowledgeDocumentController {
     public ApiResult<List<KnowledgeDocument>> uploadDocuments(
             @RequestParam("knowledgeBaseId") Long knowledgeBaseId,
             @RequestParam("file") List<MultipartFile> files,
-            @RequestParam(required = false, value = "metadata") String metadata
+            @RequestParam(required = false, value = "metadata") String metadata,
+            @RequestParam(required = false, value = "pipelineConfig") String pipelineConfigJson
     ) {
         // 一个或多个同名 file 字段都会被 Spring 转换为文件列表。
         return ApiResult.ok(
                 documentService.uploadDocuments(
                         knowledgeBaseId,
                         files,
-                        metadata
+                        metadata,
+                        pipelineConfigJson
                 )
         );
     }

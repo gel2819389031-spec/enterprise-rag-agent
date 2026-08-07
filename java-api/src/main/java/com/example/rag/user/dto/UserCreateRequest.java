@@ -5,15 +5,10 @@ import lombok.Data;
 /**
  * 创建用户请求。
  *
- * <p>只接收调用方需要填写的业务字段，主键、时间和软删除标记由服务端生成。</p>
+ * <p>租户 ID 由服务端自动从当前操作者继承，不需要前端传入。</p>
  */
 @Data
 public class UserCreateRequest {
-
-    /**
-     * 所属租户 ID。
-     */
-    private Long tenantId;
 
     /**
      * 用户名或外部身份账号。

@@ -5,6 +5,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import com.example.rag.ingestion.config.PipelineConfig;
 
 import java.time.Instant;
 
@@ -77,6 +78,13 @@ public class IngestionTask {
      * 任务处理完成时间。
      */
     private Instant finishedAt;
+    /**
+     * 流水线配置。从 KB 默认值合并上传覆盖后冻结到任务上，
+     * 保证任务执行期间配置不变。
+     */
+    @TableField(typeHandler = com.example.rag.common.config.database.PipelineConfigTypeHandler.class)
+    private PipelineConfig pipelineConfig;
+
     /**
      * 创建人用户 ID。
      */

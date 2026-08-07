@@ -11,6 +11,7 @@ import com.example.rag.common.error.ClientException;
 import com.example.rag.common.error.ServiceException;
 import com.example.rag.common.id.IdGenerator;
 import com.example.rag.common.security.CurrentUserProvider;
+import com.example.rag.ingestion.config.PipelineConfig;
 import com.example.rag.knowledge.dto.KnowledgeBaseCreateRequest;
 import com.example.rag.knowledge.dto.KnowledgeBaseQueryRequest;
 import com.example.rag.knowledge.dto.KnowledgeBaseUpdateRequest;
@@ -36,7 +37,6 @@ import java.util.List;
 public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
 
     private static final String DEFAULT_VISIBILITY = "PRIVATE";
-    private static final String DEFAULT_CHUNK_STRATEGY = "{}";
 
     private final KnowledgeBaseMapper knowledgeBaseMapper;
     private final IdGenerator idGenerator;
@@ -61,7 +61,9 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
                 .name(request.getName())
                 .description(request.getDescription())
                 .visibility(defaultIfBlank(request.getVisibility(), DEFAULT_VISIBILITY))
-                .chunkStrategy(DEFAULT_CHUNK_STRATEGY)
+                .chunkStrategy(request.getPipelineConfig() != null
+                        ? request.getPipelineConfig()
+                        : PipelineConfig.defaults())
                 .status(1)
                 .documentCount(0L)
                 .createdBy(currentUserId)
@@ -131,6 +133,10 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
         if (!isBlank(request.getVisibility())) {
             // 如果传入可见性，则更新知识库可见性。
             knowledgeBase.setVisibility(request.getVisibility());
+        }
+        if (request.getPipelineConfig() != null) {
+            // 如果传入流水线配置，则替换知识库的默认配置。
+            knowledgeBase.setChunkStrategy(request.getPipelineConfig());
         }
         // 调用 Mapper 按主键更新知识库基础信息。
         knowledgeBaseMapper.updateById(knowledgeBase);

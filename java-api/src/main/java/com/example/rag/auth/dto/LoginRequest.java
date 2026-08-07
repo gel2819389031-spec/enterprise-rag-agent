@@ -5,16 +5,15 @@ import lombok.Data;
 
 /**
  * 用户登录请求。
+ *
+ * <p>租户编码可选；不传时自动根据用户名查找所属租户。</p>
  */
 @Data
 public class LoginRequest {
 
     /**
-     * 租户编码。
-     *
-     * <p>同一用户名可以存在于不同租户，所以登录需要租户编码。</p>
+     * 租户编码（可选，为空时自动根据用户名查找所属租户）。
      */
-    @NotBlank(message = "租户编码不能为空")
     private String tenantCode;
 
     /**

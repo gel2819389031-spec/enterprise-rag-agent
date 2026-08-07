@@ -115,11 +115,12 @@ public class EmbedStep extends PipelineStep {
                 return;
             }
 
-            // 防止配置中的批量大小为 0。
-            int batchSize = Math.max(
-                    1,
-                    properties.getBatchSize()
-            );
+            // 从任务流水线配置读取向量化参数，fallback 到全局默认值。
+            com.example.rag.ingestion.config.PipelineConfig pipelineConfig =
+                    task.getPipelineConfig();
+            String effectiveModel = resolveModel(pipelineConfig);
+            int effectiveDimension = resolveDimension(pipelineConfig);
+            int batchSize = resolveBatchSize(pipelineConfig);
 
             int totalBatches =
                     (int) Math.ceil(
@@ -147,7 +148,8 @@ public class EmbedStep extends PipelineStep {
 
                 try {
                     // 调用 Python Embedding 并保存当前批次向量。
-                    embeddingService.embedBatch(batch);
+                    embeddingService.embedBatch(
+                            batch, effectiveModel, effectiveDimension);
 
                     ingestionMetrics.recordEmbeddingBatch(
                             "SUCCESS",
@@ -298,6 +300,37 @@ public class EmbedStep extends PipelineStep {
         return Duration.ofNanos(
                 Math.max(elapsedNanos, 0L)
         );
+    }
+
+    /** 解析 embedding 模型名，优先用任务配置，否则用全局默认。 */
+    private String resolveModel(
+            com.example.rag.ingestion.config.PipelineConfig config) {
+        if (config != null
+                && config.getEmbeddingModel() != null
+                && !config.getEmbeddingModel().isBlank()) {
+            return config.getEmbeddingModel();
+        }
+        return properties.getModel();
+    }
+
+    /** 解析向量维度，优先用任务配置，否则用全局默认。 */
+    private int resolveDimension(
+            com.example.rag.ingestion.config.PipelineConfig config) {
+        if (config != null
+                && config.getEmbeddingDimension() != null
+                && config.getEmbeddingDimension() > 0) {
+            return config.getEmbeddingDimension();
+        }
+        return properties.getDimension();
+    }
+
+    /** 解析批处理大小，优先用任务配置，否则用全局默认。 */
+    private int resolveBatchSize(
+            com.example.rag.ingestion.config.PipelineConfig config) {
+        int batchSize = config != null
+                ? config.getEffectiveEmbeddingBatchSize(properties.getBatchSize())
+                : properties.getBatchSize();
+        return Math.max(1, batchSize);
     }
 
 }

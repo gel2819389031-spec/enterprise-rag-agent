@@ -46,7 +46,7 @@ management:
         # 暴露健康检查、基础信息和指标端点。
         include: health,info,metrics
 rustfs:
-    endpoint: ${RAG_STORAGE_ENDPOINT:http://121.40.128.24:9000}
+    endpoint: ${RAG_STORAGE_ENDPOINT:http://localhost:9000}
     access-key-id: ${RAG_STORAGE_ACCESS_KEY_ID}
     secret-access-key: ${RAG_STORAGE_SECRET_ACCESS_KEY}
     bucket: ${RAG_STORAGE_BUCKET:rag-documents}

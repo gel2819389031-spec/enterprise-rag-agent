@@ -11,7 +11,9 @@ import com.example.rag.common.id.IdGenerator;
 import com.example.rag.common.security.CurrentUserProvider;
 import com.example.rag.common.storage.ObjectStorageService;
 import com.example.rag.common.utils.FileHashUtils;
+import com.example.rag.ingestion.config.PipelineConfig;
 import com.example.rag.ingestion.dto.IngestionTaskCreateCommand;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.example.rag.ingestion.service.DocumentIngestionRegistrationService;
 import com.example.rag.knowledge.entity.KnowledgeBase;
 import com.example.rag.knowledge.entity.KnowledgeDocument;
@@ -62,7 +64,8 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
     public List<KnowledgeDocument> uploadDocuments(
             Long knowledgeBaseId,
             List<MultipartFile> files,
-            String metadata
+            String metadata,
+            String pipelineConfigJson
     ) {
         // 文件列表不能为空。
         if (files == null || files.isEmpty()) {
@@ -81,7 +84,8 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
                     uploadDocument(
                             knowledgeBaseId,
                             file,
-                            metadata
+                            metadata,
+                            pipelineConfigJson
                     );
 
             // 汇总本批次已成功登记的文档。
@@ -92,7 +96,8 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
     }
 
     @Override
-    public KnowledgeDocument uploadDocument(Long knowledgeBaseId, MultipartFile file, String metadata) {
+    public KnowledgeDocument uploadDocument(Long knowledgeBaseId, MultipartFile file,
+                                           String metadata, String pipelineConfigJson) {
         validateUploadFile(file);
         KnowledgeBase knowledgeBase = knowledgeBaseService.ensureUsable(knowledgeBaseId);
         Long currentUserId = currentUserProvider.requireUserId();
@@ -148,12 +153,21 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
                 .createdBy(currentUserId)
                 .build();
 
+        // 合并 KB 默认流水线配置与本次上传覆盖。
+        PipelineConfig kbDefaults = knowledgeBase.getChunkStrategy();
+        if (kbDefaults == null) {
+            kbDefaults = PipelineConfig.defaults();
+        }
+        PipelineConfig uploadOverride = parsePipelineConfigJson(pipelineConfigJson);
+        PipelineConfig effectiveConfig = kbDefaults.merge(uploadOverride);
+
         // 构造文档入库任务创建命令。
         IngestionTaskCreateCommand command = new IngestionTaskCreateCommand();
         command.setTenantId(knowledgeBase.getTenantId());
         command.setKnowledgeBaseId(knowledgeBaseId);
         command.setDocumentId(documentId);
         command.setCreatedBy(currentUserId);
+        command.setPipelineConfig(effectiveConfig);
 
         try {
             // 短事务保存文档、任务和步骤，并在提交后启动流水线。
@@ -478,6 +492,23 @@ public class KnowledgeDocumentServiceImpl implements KnowledgeDocumentService {
                     BaseErrorCode.DATABASE_ERROR,
                     "更新知识库文档数量失败"
             );
+        }
+    }
+
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+
+    /**
+     * 将上传时传入的 JSON 字符串解析为 PipelineConfig，失败或为空返回 null。
+     */
+    private PipelineConfig parsePipelineConfigJson(String json) {
+        if (json == null || json.isBlank()) {
+            return null;
+        }
+        try {
+            return OBJECT_MAPPER.readValue(json, PipelineConfig.class);
+        } catch (Exception e) {
+            log.warn("解析上传流水线配置失败，将使用 KB 默认配置: {}", json, e);
+            return null;
         }
     }
 }

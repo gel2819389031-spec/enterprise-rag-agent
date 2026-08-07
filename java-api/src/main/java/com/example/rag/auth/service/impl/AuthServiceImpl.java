@@ -36,40 +36,45 @@ public class AuthServiceImpl implements AuthService {
     private final RefreshTokenService refreshTokenService;
     @Override
     public TokenResponse login(LoginRequest request,String clientIp, String userAgent) {
-        //查询用户
-        SysTenant tenant=tenantMapper.selectOne(
-                new LambdaQueryWrapper<SysTenant>()
-                        .eq(SysTenant::getTenantCode,request.getTenantCode())
-        );
-        // 租户不存在、被删除或禁用时拒绝登录。
-        if (
-                tenant == null
-                        || Boolean.TRUE.equals(
-                        tenant.getDeleted()
-                )
-                        || !Integer.valueOf(1).equals(
-                        tenant.getStatus()
-                )
-        ) {
-            throw loginFailed();
+        // 第一步：解析租户。如果传了 tenantCode 则精确匹配，否则先查用户再反查租户。
+        SysTenant tenant;
+        if (request.getTenantCode() != null && !request.getTenantCode().isBlank()) {
+            tenant = tenantMapper.selectOne(
+                    new LambdaQueryWrapper<SysTenant>()
+                            .eq(SysTenant::getTenantCode, request.getTenantCode())
+            );
+            if (tenant == null
+                    || Boolean.TRUE.equals(tenant.getDeleted())
+                    || !Integer.valueOf(1).equals(tenant.getStatus())) {
+                throw loginFailed();
+            }
+        } else {
+            // 未传租户编码：按用户名查找用户，自动推导租户。
+            SysUser userByUsername = userMapper.selectOne(
+                    new LambdaQueryWrapper<SysUser>()
+                            .eq(SysUser::getUsername, request.getUsername())
+                            .eq(SysUser::getDeleted, false)
+                            .eq(SysUser::getStatus, 1)
+            );
+            if (userByUsername == null) {
+                throw loginFailed();
+            }
+            tenant = tenantMapper.selectById(userByUsername.getTenantId());
+            if (tenant == null
+                    || Boolean.TRUE.equals(tenant.getDeleted())
+                    || !Integer.valueOf(1).equals(tenant.getStatus())) {
+                throw loginFailed();
+            }
         }
 
         /*
          * 第二步：在租户范围内查询用户。
-         *
-         * 不能只按 username 查询，否则可能查到其他租户的用户。
          */
         SysUser user =
                 userMapper.selectOne(
                         new LambdaQueryWrapper<SysUser>()
-                                .eq(
-                                        SysUser::getTenantId,
-                                        tenant.getId()
-                                )
-                                .eq(
-                                        SysUser::getUsername,
-                                        request.getUsername()
-                                )
+                                .eq(SysUser::getTenantId, tenant.getId())
+                                .eq(SysUser::getUsername, request.getUsername())
                 );
         // 第三步：检查用户状态。
         if (

@@ -45,10 +45,10 @@ public class KnowledgeBase {
      */
     private Long embeddingModelConfigId;
     /**
-     * 切片策略 JSON 字符串。
+     * 流水线配置（切分策略 + 向量化参数）。
      */
-    @TableField(typeHandler = JsonbTypeHandler.class)
-    private String chunkStrategy;
+    @TableField(value = "chunk_strategy", typeHandler = com.example.rag.common.config.database.PipelineConfigTypeHandler.class)
+    private com.example.rag.ingestion.config.PipelineConfig chunkStrategy;
     /**
      * 知识库状态，默认 1 表示启用。
      */
