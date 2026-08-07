@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, App, Button, Empty, Input, List, Popconfirm, Select, Spin, Tag, Typography } from 'antd';
 import { DeleteOutlined, PlusOutlined, SendOutlined, StopOutlined } from '@ant-design/icons';
 import { chatApi, streamChat } from '../api/modules';
+import { MarkdownRenderer } from '../components/MarkdownRenderer';
 import type { ChatMessage } from '../types/api';
 interface LiveMessage {
   role: 'USER' | 'ASSISTANT';
@@ -174,7 +175,7 @@ export function ChatPage() {
               <div key={i} className={`message ${m.role.toLowerCase()}`}>
                 <div className="message-role">{m.role === 'USER' ? '你' : 'Nexus'}</div>
                 <div className="message-body">
-                  {m.content || <Spin size="small" />}
+                  {m.content ? <MarkdownRenderer content={m.content} /> : <Spin size="small" />}
                   {m.citations && <div className="citations">引用来源 {m.citations.length} 条</div>}
                 </div>
               </div>
