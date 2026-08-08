@@ -6,11 +6,9 @@ import com.example.rag.embedding.service.ChunkEmbeddingService;
 import com.example.rag.ingestion.dto.*;
 import com.example.rag.ingestion.service.IngestionTaskQueryService;
 import com.example.rag.ingestion.service.IngestionTaskRetryService;
-import com.example.rag.ingestion.service.IngestionTaskService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
-
 import java.util.List;
 
 /**
@@ -21,8 +19,6 @@ import java.util.List;
 @RequestMapping("/api/ingestion/tasks")
 @PreAuthorize("hasAnyRole('PLATFORM_ADMIN', 'ADMIN')")
 public class IngestionTaskController {
-
-    private final IngestionTaskService ingestionTaskService;
     private final ChunkEmbeddingService chunkEmbeddingService;
     private final IngestionTaskRetryService retryService;
     private final IngestionTaskQueryService taskQueryService;
@@ -98,29 +94,6 @@ public class IngestionTaskController {
         return ApiResult.ok();
     }
 
-    // ────────────────── 旧同步端点（废弃，保留兼容）──────────────────
-
-
-
-    /**
-     * @deprecated 使用 POST /{taskId}/retry 重试失败任务。
-     */
-//    @Deprecated
-//    @PostMapping("/{taskId}/process")
-//    public ApiResult<Void> processTask(@PathVariable("taskId") Long taskId) {
-//        documentIngestionProcessor.process(taskId);
-//        return ApiResult.ok();
-//    }
-
-    /**
-     * @deprecated 使用 POST /{taskId}/retry 重试失败任务。
-     */
-    @Deprecated
-    @PostMapping("/{taskId}/embedding")
-    public ApiResult<Void> embedChunks(@PathVariable("taskId") Long taskId) {
-        chunkEmbeddingService.embedDocumentChunks(taskId);
-        return ApiResult.ok();
-    }
     /**
      * 查询当前租户的任务统计数据。
      */

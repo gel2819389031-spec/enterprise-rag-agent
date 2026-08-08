@@ -1,11 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, App, Button, Collapse, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Table, Tag } from 'antd';
 import { DeleteOutlined, EditOutlined, PlusOutlined, RightOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
-import { kbApi } from '../api/modules';
+import { kbApi, modelApi } from '../api/modules';
 import { PageHeader } from '../components/PageHeader';
-import type { KnowledgeBase, PipelineConfig } from '../types/api';
+import type { KnowledgeBase, ModelConfig, PipelineConfig } from '../types/api';
 
 const CHUNKER_OPTIONS = [
   { value: 'recursive', label: '递归切分' },
@@ -13,28 +13,44 @@ const CHUNKER_OPTIONS = [
   { value: 'paragraph', label: '段落切分' },
 ];
 
-const EMBEDDING_MODELS = [
-  { value: 'text-embedding-v4', label: 'text-embedding-v4 (1536d)' },
-  { value: 'text-embedding-v3', label: 'text-embedding-v3 (1024d)' },
-];
+// 数据库 kb_document_chunk.embedding 列维度（pgvector 固定维度）。
+const DB_EMBEDDING_DIMENSION = 1536;
+
+/** 从模型配置解析支持的维度，兼容 {"dimensions":[...]} 与 {"dimension":N}。 */
+function parseDimensions(model: ModelConfig): number[] {
+  if (model.dimensions?.length) return model.dimensions;
+  if (!model.parameters) return [];
+  try {
+    const params = JSON.parse(model.parameters) as {
+      dimensions?: number[];
+      dimension?: number;
+    };
+    if (Array.isArray(params.dimensions)) return params.dimensions;
+    if (typeof params.dimension === 'number') return [params.dimension];
+  } catch {
+    // 忽略解析失败，返回空列表
+  }
+  return [];
+}
 
 type FormValue = Pick<KnowledgeBase, 'name' | 'description' | 'visibility'> & {
   chunkType: string;
   chunkSize: number;
   chunkOverlap: number;
   embeddingModel: string;
-  embeddingDimension: number;
   embeddingBatchSize: number;
 };
 
 /** 将表单值序列化为 PipelineConfig */
 function toPipelineConfig(v: FormValue): PipelineConfig {
+  // 下拉选项 value 编码为 "modelCode::dimension"，提交时拆回。
+  const [model, dim] = v.embeddingModel ? v.embeddingModel.split('::') : [];
   return {
     chunkType: v.chunkType || 'recursive',
     chunkSize: v.chunkSize || 800,
     chunkOverlap: v.chunkOverlap ?? 100,
-    embeddingModel: v.embeddingModel || undefined,
-    embeddingDimension: v.embeddingDimension || undefined,
+    embeddingModel: model || undefined,
+    embeddingDimension: dim ? Number(dim) : undefined,
     embeddingBatchSize: v.embeddingBatchSize || undefined,
   };
 }
@@ -46,8 +62,9 @@ function fromPipelineConfig(c?: PipelineConfig | null): Partial<FormValue> {
     chunkType: c.chunkType ?? 'recursive',
     chunkSize: c.chunkSize ?? 800,
     chunkOverlap: c.chunkOverlap ?? 100,
-    embeddingModel: c.embeddingModel ?? '',
-    embeddingDimension: c.embeddingDimension ?? 1536,
+    embeddingModel: c.embeddingModel
+      ? `${c.embeddingModel}::${c.embeddingDimension ?? DB_EMBEDDING_DIMENSION}`
+      : '',
     embeddingBatchSize: c.embeddingBatchSize ?? 10,
   };
 }
@@ -61,6 +78,26 @@ export function KnowledgePage() {
     [editing, setEditing] = useState<KnowledgeBase | null>(null),
     [open, setOpen] = useState(false);
   const [form] = Form.useForm<FormValue>();
+  const embeddingModels = useQuery({
+    queryKey: ['models', 'EMBEDDING'],
+    queryFn: () => modelApi.listByType('EMBEDDING'),
+  });
+  // 下拉选项 = 模型 × 维度组合："模型名 (N 维)"。
+  const embeddingOptions = useMemo(
+    () =>
+      (embeddingModels.data ?? []).flatMap((model) =>
+        parseDimensions(model).map((dim) => ({
+          value: `${model.modelCode}::${dim}`,
+          label: `${model.modelName} (${dim}d)`,
+          disabled: dim !== DB_EMBEDDING_DIMENSION,
+          title:
+            dim !== DB_EMBEDDING_DIMENSION
+              ? `当前数据库列维度为 ${DB_EMBEDDING_DIMENSION}，需迁移后才能使用`
+              : undefined,
+        })),
+      ),
+    [embeddingModels.data],
+  );
   // 搜索防抖 300ms
   useEffect(() => {
     const timer = setTimeout(() => setKeyword(search), 300);
@@ -229,17 +266,24 @@ export function KnowledgePage() {
                       <InputNumber min={0} max={500} step={10} style={{ width: '100%' }} />
                     </Form.Item>
                   </Space>
-                  <Form.Item name="embeddingModel" label="Embedding 模型">
-                    <Select allowClear placeholder="留空使用全局默认" options={EMBEDDING_MODELS} />
+                  <Form.Item
+                    name="embeddingModel"
+                    label="Embedding 模型（维度）"
+                    extra="维度随所选模型自动确定，需与数据库列维度一致"
+                  >
+                    <Select
+                      allowClear
+                      placeholder="留空使用全局默认"
+                      loading={embeddingModels.isLoading}
+                      options={embeddingOptions}
+                      notFoundContent={
+                        embeddingModels.isError ? '模型列表加载失败' : undefined
+                      }
+                    />
                   </Form.Item>
-                  <Space style={{ width: '100%' }} size="middle">
-                    <Form.Item name="embeddingDimension" label="向量维度" style={{ flex: 1 }}>
-                      <InputNumber min={128} max={4096} step={128} style={{ width: '100%' }} placeholder="留空使用默认" />
-                    </Form.Item>
-                    <Form.Item name="embeddingBatchSize" label="批处理大小" style={{ flex: 1 }}>
-                      <InputNumber min={1} max={50} style={{ width: '100%' }} placeholder="留空使用默认" />
-                    </Form.Item>
-                  </Space>
+                  <Form.Item name="embeddingBatchSize" label="批处理大小">
+                    <InputNumber min={1} max={50} style={{ width: '100%' }} placeholder="留空使用默认" />
+                  </Form.Item>
                 </>
               ),
             }]}

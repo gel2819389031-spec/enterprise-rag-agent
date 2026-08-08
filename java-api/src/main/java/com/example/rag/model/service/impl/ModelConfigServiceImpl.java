@@ -17,11 +17,15 @@ import com.example.rag.model.entity.ModelProvider;
 import com.example.rag.model.mapper.ModelConfigMapper;
 import com.example.rag.model.mapper.ModelProviderMapper;
 import com.example.rag.model.service.ModelConfigService;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -35,6 +39,7 @@ public class ModelConfigServiceImpl implements ModelConfigService {
     private final ModelProviderMapper providerMapper;
     private final IdGenerator idGenerator;
     private final CurrentUserProvider currentUserProvider;
+    private final ObjectMapper objectMapper;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -60,6 +65,7 @@ public class ModelConfigServiceImpl implements ModelConfigService {
                 .modelName(request.getModelName())
                 .modelType(request.getModelType())
                 .parameters(request.getParameters() != null ? request.getParameters() : "{}")
+                .dimensions(parseDimensions(request.getParameters()))
                 .isDefault(request.getIsDefault() != null ? request.getIsDefault() : false)
                 .status(request.getStatus() != null ? request.getStatus() : 1)
                 .build();
@@ -127,6 +133,10 @@ public class ModelConfigServiceImpl implements ModelConfigService {
                         .eq(ModelConfig::getTenantId, tenantId))
                 .eq(ModelConfig::getModelType, modelType)
                 .eq(ModelConfig::getStatus, 1));
+        // 如果 configs 为空，直接返回空列表，避免后续空集合查询
+        if (configs.isEmpty()) {
+            return Collections.emptyList();
+        }
         // 批量查供应商名称
         Map<Long, String> providerNames = providerMapper.selectBatchIds(
                 configs.stream().map(ModelConfig::getProviderId).distinct().toList())
@@ -165,10 +175,36 @@ public class ModelConfigServiceImpl implements ModelConfigService {
         r.setModelName(c.getModelName());
         r.setModelType(c.getModelType());
         r.setParameters(c.getParameters());
+        // 新增：回填模型支持的向量维度
+        r.setDimensions(parseDimensions(c.getParameters()));
         r.setIsDefault(c.getIsDefault());
         r.setStatus(c.getStatus());
         return r;
     }
 
     private boolean isBlank(String s) { return s == null || s.isBlank(); }
+    private List<Integer> parseDimensions(String parameters) {
+        if (parameters == null || parameters.isBlank()) {
+            return List.of();
+        }
+        try {
+            JsonNode node = objectMapper.readTree(parameters);
+            JsonNode dims = node.get("dimensions");
+            if (dims != null && dims.isArray()) {
+                List<Integer> result = new ArrayList<>();
+                for (JsonNode d : dims) {
+                    result.add(d.asInt());
+                }
+                return result;
+            }
+            // 兼容旧单值 {"dimension":1536}
+            JsonNode single = node.get("dimension");
+            if (single != null && single.isInt()) {
+                return List.of(single.asInt());
+            }
+        } catch (Exception ex) {
+            log.warn("解析模型维度失败, parameters={}", parameters, ex);
+        }
+        return List.of();
+    }
 }

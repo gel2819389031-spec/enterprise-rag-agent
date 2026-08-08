@@ -40,7 +40,8 @@ public class EmbeddingBatchPersistenceService {
             chunkMapper.updateEmbedding(
                     chunk.getId(),
                     toPgVector(item.getEmbedding()),
-                    data.getModel()
+                    data.getModel(),
+                    data.getDimension()          // 新增：同时写维度
             );
         }
     }

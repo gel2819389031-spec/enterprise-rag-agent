@@ -17,6 +17,14 @@ class RetrievalCandidate(BaseModel):
         default=None,
         description="向量检索的余弦相似度。",
     )
+    embedding_model: str | None = Field(
+        default=None,
+        description="生成该向量使用的模型。",
+    )
+    embedding_dimension: int | None = Field(
+        default=None,
+        description="生成该向量使用的维度。",
+    )
     keyword_score: float | None = Field(
         default=None,
         description="关键词检索的命中分数。",

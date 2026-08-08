@@ -16,32 +16,55 @@ class EmbeddingClient:
     def __init__(self) -> None:
         self._settings = get_settings()
         # 模型 → 客户端缓存，避免为同一模型重复创建实例。
-        self._clients: dict[str, OpenAIEmbeddings] = {}
+        self._clients: dict[tuple[str, int | None], OpenAIEmbeddings] = {}
         # 预热默认模型客户端。
-        self._get_or_create_client(self._settings.embedding_model)
+        self._get_or_create_client(
+            self._settings.embedding_model,
+            self._settings.embedding_dimension,
+        )
 
-    def _get_or_create_client(self, model: str) -> OpenAIEmbeddings:
-        if model not in self._clients:
-            self._clients[model] = OpenAIEmbeddings(
+    def _get_or_create_client(
+            self,
+            model: str,
+            dimension: int | None = None,
+    ) -> OpenAIEmbeddings:
+        key = (model, dimension)
+        if key not in self._clients:
+            kwargs = dict(
                 model=model,
                 api_key=self._settings.embedding_api_key,
                 base_url=self._settings.embedding_base_url,
-                dimensions=self._settings.embedding_dimension,
                 request_timeout=self._settings.embedding_timeout_seconds,
-                # 关闭 LangChain 自动 token 化与自动按 token 分片。
                 check_embedding_ctx_length=False,
             )
-        return self._clients[model]
+            # 有维度则显式指定；不传时由模型返回默认维度。
+            if dimension is not None:
+                kwargs["dimensions"] = dimension
+            self._clients[key] = OpenAIEmbeddings(**kwargs)
+        return self._clients[key]
 
-    def embed_texts(self, texts: list[str], model: str | None = None) -> list[list[float]]:
+    def embed_texts(
+            self,
+            texts: list[str],
+            model: str | None = None,
+            dimension: int | None = None,
+    ) -> list[list[float]]:
         """批量生成文本向量。
 
         Args:
             texts: 待向量化的文本列表。
             model: 指定模型名称，None 则使用全局默认模型。
+            dimension: 指定向量维度，None 则使用全局默认维度。
         """
         effective_model = model or self._settings.embedding_model
-        client = self._get_or_create_client(effective_model)
+        effective_dimension = (
+            dimension
+            if dimension is not None
+            else self._settings.embedding_dimension
+        )
+        client = self._get_or_create_client(
+            effective_model, effective_dimension
+        )
 
         try:
             vectors = client.embed_documents(texts)
@@ -54,9 +77,22 @@ class EmbeddingClient:
         self._validate_vectors(vectors, len(texts))
         return vectors
 
-    def embed_query(self, text: str) -> list[float]:
-        """生成用户问题向量，后续 RAG 检索会复用（使用默认模型）。"""
-        client = self._get_or_create_client(self._settings.embedding_model)
+    def embed_query(
+            self,
+            text: str,
+            model: str | None = None,
+            dimension: int | None = None,
+    ) -> list[float]:
+        """生成用户问题向量，后续 RAG 检索会复用。"""
+        effective_model = model or self._settings.embedding_model
+        effective_dimension = (
+            dimension
+            if dimension is not None
+            else self._settings.embedding_dimension
+        )
+        client = self._get_or_create_client(
+            effective_model, effective_dimension
+        )
         try:
             vector = client.embed_query(text)
         except Exception as exc:
@@ -68,24 +104,38 @@ class EmbeddingClient:
         self._validate_vector(vector)
         return vector
 
-    def _validate_vectors(self, vectors: list[list[float]], expected_size: int) -> None:
-        """校验批量向量数量和每个向量维度。"""
+    def _validate_vectors(
+        self,
+        vectors: list[list[float]],
+        expected_size: int,
+        expected_dimension: int | None,
+    ) -> None:
         if len(vectors) != expected_size:
             raise HTTPException(
                 status_code=502,
-                detail=f"Embedding count mismatch: expected={expected_size}, actual={len(vectors)}",
+                detail=(
+                    "Embedding count mismatch: "
+                    f"expected={expected_size}, actual={len(vectors)}"
+                ),
             )
-
         for vector in vectors:
-            self._validate_vector(vector)
+            self._validate_vector(vector, expected_dimension)
 
-    def _validate_vector(self, vector: list[float]) -> None:
-        """校验单个向量维度与全局配置一致。"""
-        if len(vector) != self._settings.embedding_dimension:
+
+
+    def _validate_vector(
+        self,
+        vector: list[float],
+        expected_dimension: int | None,
+    ) -> None:
+        if (
+            expected_dimension is not None
+            and len(vector) != expected_dimension
+        ):
             raise HTTPException(
                 status_code=502,
                 detail=(
                     "Embedding dimension mismatch: "
-                    f"expected={self._settings.embedding_dimension}, actual={len(vector)}"
+                    f"expected={expected_dimension}, actual={len(vector)}"
                 ),
             )

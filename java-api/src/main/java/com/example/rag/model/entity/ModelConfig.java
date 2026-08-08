@@ -12,6 +12,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.time.Instant;
+import java.util.List;
 
 /**
  * 模型配置实体，对应 {@code model_config} 表。
@@ -43,7 +44,9 @@ public class ModelConfig {
     /** 模型参数 JSON。 */
     @TableField(typeHandler = JsonbTypeHandler.class)
     private String parameters;
-
+    /** 支持的向量维度列表（从 parameters.dimensions 解析，兼容旧单值 dimension）。 */
+    @TableField(exist = false)
+    private List<Integer> dimensions;
     /** 是否为该类型的默认模型。 */
     private Boolean isDefault;
 

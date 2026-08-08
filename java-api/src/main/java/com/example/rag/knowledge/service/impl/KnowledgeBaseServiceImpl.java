@@ -11,6 +11,7 @@ import com.example.rag.common.error.ClientException;
 import com.example.rag.common.error.ServiceException;
 import com.example.rag.common.id.IdGenerator;
 import com.example.rag.common.security.CurrentUserProvider;
+import com.example.rag.embedding.config.EmbeddingClientProperties;
 import com.example.rag.ingestion.config.PipelineConfig;
 import com.example.rag.knowledge.dto.KnowledgeBaseCreateRequest;
 import com.example.rag.knowledge.dto.KnowledgeBaseQueryRequest;
@@ -21,17 +22,24 @@ import com.example.rag.knowledge.mapper.KnowledgeBaseMapper;
 import com.example.rag.knowledge.mapper.KnowledgeDocumentChunkMapper;
 import com.example.rag.knowledge.mapper.KnowledgeDocumentMapper;
 import com.example.rag.knowledge.service.KnowledgeBaseService;
+import com.example.rag.model.entity.ModelConfig;
+import com.example.rag.model.mapper.ModelConfigMapper;
 import com.example.rag.tenant.service.TenantService;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
  * 知识库服务实现。
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
@@ -43,6 +51,7 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
     private final KnowledgeDocumentMapper documentMapper;
     private final KnowledgeDocumentChunkMapper chunkMapper;
     private final CurrentUserProvider currentUserProvider;
+    private final ObjectMapper objectMapper;
 
     /**
      * 创建知识库，并绑定当前请求中的租户和创建人。
@@ -54,6 +63,7 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
         Long tenantId =  currentUserProvider.requireTenantId();
         // 从用户上下文读取当前用户 ID，用于记录创建人。
         Long currentUserId = currentUserProvider.requireUserId();
+        validateEmbeddingConfig(request.getPipelineConfig());
         // 构造知识库实体，并补齐默认可见性、切片策略、状态和软删除标记。
         KnowledgeBase knowledgeBase = KnowledgeBase.builder()
                 .id(idGenerator.nextId())
@@ -122,6 +132,7 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
     public KnowledgeBase updateKnowledgeBase(KnowledgeBaseUpdateRequest request) {
         // 更新前先查询知识库，确保数据存在且属于当前租户。
         KnowledgeBase knowledgeBase = getKnowledgeBase(request.getId());
+        validateEmbeddingConfig(request.getPipelineConfig());
         if (!isBlank(request.getName())) {
             // 如果传入名称，则更新知识库名称。
             knowledgeBase.setName(request.getName());
@@ -224,5 +235,68 @@ public class KnowledgeBaseServiceImpl implements KnowledgeBaseService {
 
     private boolean isBlank(String value) {
         return value == null || value.isBlank();
+    }
+    private final ModelConfigMapper modelConfigMapper;
+    private final EmbeddingClientProperties embeddingProperties;
+
+    /** 校验知识库绑定的 (模型, 维度) 与数据库列维度兼容。 */
+    private void validateEmbeddingConfig(PipelineConfig pipelineConfig) {
+        if (pipelineConfig == null
+                || pipelineConfig.getEmbeddingModel() == null
+                || pipelineConfig.getEmbeddingModel().isBlank()) {
+            return; // 未绑定模型，使用全局默认。
+        }
+        Integer dimension = pipelineConfig.getEmbeddingDimension();
+        if (dimension == null) {
+            return; // 未指定维度，服务端 fallback 全局配置。
+        }
+        // 1. 维度必须等于数据库列维度。
+        if (!embeddingProperties.getDimension().equals(dimension)) {
+            throw new ClientException(
+                    BaseErrorCode.BAD_REQUEST,
+                    "所选向量维度 " + dimension + " 与数据库列维度 "
+                            + embeddingProperties.getDimension() + " 不兼容，"
+                            + "如需更换请先迁移数据库列");
+        }
+        // 2. 模型必须声明支持该维度。
+        List<ModelConfig> configs = modelConfigMapper.selectList(
+                new LambdaQueryWrapper<ModelConfig>()
+                        .eq(ModelConfig::getModelCode,
+                                pipelineConfig.getEmbeddingModel())
+                        .eq(ModelConfig::getModelType, "EMBEDDING")
+                        .eq(ModelConfig::getStatus, 1));
+        boolean supported = configs.stream()
+                .anyMatch(c -> parseDimensions(c.getParameters())
+                        .contains(dimension));
+        if (!supported) {
+            throw new ClientException(
+                    BaseErrorCode.BAD_REQUEST,
+                    "模型 " + pipelineConfig.getEmbeddingModel()
+                            + " 不支持 " + dimension + " 维");
+        }
+    }
+    private List<Integer> parseDimensions(String parameters) {
+        if (parameters == null || parameters.isBlank()) {
+            return List.of();
+        }
+        try {
+            JsonNode node = objectMapper.readTree(parameters);
+            JsonNode dims = node.get("dimensions");
+            if (dims != null && dims.isArray()) {
+                List<Integer> result = new ArrayList<>();
+                for (JsonNode d : dims) {
+                    result.add(d.asInt());
+                }
+                return result;
+            }
+            // 兼容旧单值 {"dimension":1536}
+            JsonNode single = node.get("dimension");
+            if (single != null && single.isInt()) {
+                return List.of(single.asInt());
+            }
+        } catch (Exception ex) {
+            log.warn("解析模型维度失败, parameters={}", parameters, ex);
+        }
+        return List.of();
     }
 }

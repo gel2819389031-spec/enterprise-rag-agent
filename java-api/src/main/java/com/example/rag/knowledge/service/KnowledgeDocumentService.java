@@ -19,21 +19,19 @@ public interface KnowledgeDocumentService {
      * @param knowledgeBaseId 知识库 ID
      * @param files 待上传文件列表
      * @param metadata 公共元数据
-     * @param pipelineConfigJson 可选的流水线配置覆盖（JSON），null 使用 KB 默认
      * @return 已创建的文档列表
      */
     List<KnowledgeDocument> uploadDocuments(
             Long knowledgeBaseId,
             List<MultipartFile> files,
-            String metadata,
-            String pipelineConfigJson
+            String metadata
     );
 
     /**
      * 上传文件到对象存储，并登记文档元数据。
      */
     KnowledgeDocument uploadDocument(Long knowledgeBaseId, MultipartFile file,
-                                     String metadata, String pipelineConfigJson);
+                                     String metadata);
     /**
      * 登记文档元数据。
      *

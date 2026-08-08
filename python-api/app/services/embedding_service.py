@@ -33,9 +33,11 @@ class EmbeddingService:
         model = request.model or self._settings.embedding_model
         # 调用 Client 层，当前版本会生成稳定 Mock 向量。
         vectors = self._client.embed_texts(request.texts, model)
-
+        # 维度以模型实际返回为准（配置维度只做校验，不强制生成）。
+        dimension = len(vectors[0]) if vectors else 0
         # enumerate 会同时拿到列表下标和元素。
         # index 用于告诉调用方：这个向量对应原始 texts 的第几个文本。
+
         items = [
             EmbeddingItem(index=index, embedding=vector)
             for index, vector in enumerate(vectors)
@@ -43,7 +45,7 @@ class EmbeddingService:
 
         return EmbeddingData(
             model=model,
-            dimension=self._settings.embedding_dimension,
+            dimension=dimension,
             items=items,
         )
 

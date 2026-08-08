@@ -7,6 +7,7 @@ import com.example.rag.ingestion.chunk.TextChunk;
 import com.example.rag.ingestion.chunk.TextChunker;
 import com.example.rag.ingestion.chunk.TextChunkerFactory;
 import com.example.rag.ingestion.chunk.TextNormalizer;
+import com.example.rag.ingestion.config.PipelineConfig;
 import com.example.rag.ingestion.entity.IngestionTask;
 import com.example.rag.ingestion.enums.IngestionStepCode;
 import com.example.rag.ingestion.metrics.IngestionMetrics;
@@ -115,10 +116,10 @@ public class DocumentIngestionProcessor {
                 () -> parseDocument(document)
         );
         // 第二阶段：清洗文本并执行分块（使用任务配置）。
-        com.example.rag.ingestion.config.PipelineConfig pipelineConfig =
+        PipelineConfig pipelineConfig =
                 task.getPipelineConfig() != null
                         ? task.getPipelineConfig()
-                        : com.example.rag.ingestion.config.PipelineConfig.defaults();
+                        : PipelineConfig.defaults();
         List<TextChunk> chunks = executeTrackedStep(
                 taskId,
                 IngestionStepCode.SPLIT_CHUNK,

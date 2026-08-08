@@ -16,9 +16,16 @@ class PgVectorRetriever:
                  tenant_id: int,
                  knowledge_base_id: int,
                  top_k: int | None = None)-> list[Document]:
-        # 1. 先把用户问题向量化。
-        query_vector=self._embedding_client.embed_query(question)
-        # 2. pgvector 接收形如 [0.1,0.2,...] 的向量字符串。
+        # 1. 解析知识库绑定的 (模型, 维度)，保证与库内向量同一空间。
+        model, dimension = self._resolve_embedding_config(knowledge_base_id)
+
+        # 2. 用知识库模型向量化查询。
+        query_vector = self._embedding_client.embed_query(
+            question,
+            model=model,
+            dimension=dimension,
+        )
+        # 3. pgvector 接收形如 [0.1,0.2,...] 的向量字符串。
         vector_text  ="["+ ",".join([str(x) for x in query_vector])+"]"
         # 3. 控制召回数量。
         limit = top_k or self._settings.retrieval_vector_top_k
@@ -41,6 +48,8 @@ class PgVectorRetriever:
               AND chunk.knowledge_base_id = %s
               AND chunk.deleted = false
               AND chunk.embedding IS NOT NULL
+              AND chunk.embedding_model = %s
+              AND chunk.embedding_dimension = %s
             ORDER BY chunk.embedding <=> %s::vector
             LIMIT %s
         """
@@ -65,4 +74,32 @@ class PgVectorRetriever:
                 )
             )
         return candidates
+
+    def _resolve_embedding_config(
+            self,
+            knowledge_base_id: int,
+    ) -> tuple[str, int]:
+        """读取知识库绑定 (embeddingModel, embeddingDimension)，缺失时用全局配置。"""
+        sql = """
+               SELECT chunk_strategy->>'embeddingModel',
+                      chunk_strategy->>'embeddingDimension'
+               FROM kb_knowledge_base
+               WHERE id = %s
+                 AND deleted = false
+                 AND status = 1
+               LIMIT 1
+           """
+        model: str | None = None
+        dimension: int | None = None
+        with get_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(sql, (knowledge_base_id,))
+                row = cursor.fetchone()
+        if row is not None:
+            model = row[0] or None
+            dimension = int(row[1]) if row[1] else None
+        return (
+            model or self._settings.embedding_model,
+            dimension if dimension is not None else self._settings.embedding_dimension,
+        )
 

@@ -49,21 +49,6 @@ public class PipelineConfig {
         return new PipelineConfig();
     }
 
-    /** 合并上传覆盖到 KB 默认值上：覆盖字段非 null 则替换，否则保留 KB 默认。 */
-    public PipelineConfig merge(PipelineConfig override) {
-        if (override == null) {
-            return this;
-        }
-        return PipelineConfig.builder()
-                .chunkType(override.chunkType != null ? override.chunkType : this.chunkType)
-                .chunkSize(override.chunkSize != null ? override.chunkSize : this.chunkSize)
-                .chunkOverlap(override.chunkOverlap != null ? override.chunkOverlap : this.chunkOverlap)
-                .embeddingModel(override.embeddingModel != null ? override.embeddingModel : this.embeddingModel)
-                .embeddingDimension(override.embeddingDimension != null ? override.embeddingDimension : this.embeddingDimension)
-                .embeddingBatchSize(override.embeddingBatchSize != null ? override.embeddingBatchSize : this.embeddingBatchSize)
-                .build();
-    }
-
     // ---------- 便捷取值（带 fallback）----------
 
     public int getEffectiveEmbeddingBatchSize(int fallbackBatchSize) {

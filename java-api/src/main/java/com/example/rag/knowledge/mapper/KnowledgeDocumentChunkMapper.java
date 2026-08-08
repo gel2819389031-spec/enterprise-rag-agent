@@ -50,10 +50,12 @@ public interface KnowledgeDocumentChunkMapper extends BaseMapper<KnowledgeDocume
     update kb_document_chunk
     set embedding = #{embedding}::vector,
         embedding_model = #{embeddingModel},
+        embedding_dimension = #{dimension},
         updated_at = now()
     where id = #{chunkId}
 """)
     void updateEmbedding(@Param("chunkId") Long chunkId,
                          @Param("embedding") String embedding,
-                         @Param("embeddingModel") String embeddingModel);
+                         @Param("embeddingModel") String embeddingModel,
+                         @Param("embeddingDimension") Integer embeddingDimension);
 }

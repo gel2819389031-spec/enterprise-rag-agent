@@ -13,8 +13,7 @@ import com.example.rag.knowledge.mapper.KnowledgeDocumentChunkMapper;
 import com.example.rag.knowledge.service.KnowledgeDocumentService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Propagation;
-import org.springframework.transaction.annotation.Transactional;
+import com.example.rag.ingestion.config.PipelineConfig;
 
 import java.time.Duration;
 import java.util.List;
@@ -116,7 +115,7 @@ public class EmbedStep extends PipelineStep {
             }
 
             // 从任务流水线配置读取向量化参数，fallback 到全局默认值。
-            com.example.rag.ingestion.config.PipelineConfig pipelineConfig =
+            PipelineConfig pipelineConfig =
                     task.getPipelineConfig();
             String effectiveModel = resolveModel(pipelineConfig);
             int effectiveDimension = resolveDimension(pipelineConfig);
@@ -304,7 +303,7 @@ public class EmbedStep extends PipelineStep {
 
     /** 解析 embedding 模型名，优先用任务配置，否则用全局默认。 */
     private String resolveModel(
-            com.example.rag.ingestion.config.PipelineConfig config) {
+            PipelineConfig config) {
         if (config != null
                 && config.getEmbeddingModel() != null
                 && !config.getEmbeddingModel().isBlank()) {

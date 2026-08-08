@@ -319,6 +319,8 @@ export interface ModelConfig {
   modelName: string;
   modelType: ModelType;
   parameters?: string;
+  /** 支持的向量维度列表（后端返回该字段时优先使用，否则从 parameters 解析）。 */
+  dimensions?: number[];
   isDefault: boolean;
   status: number;
 }

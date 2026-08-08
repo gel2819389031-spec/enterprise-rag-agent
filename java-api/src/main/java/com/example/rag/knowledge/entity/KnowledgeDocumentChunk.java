@@ -66,6 +66,10 @@ public class KnowledgeDocumentChunk {
     private String embeddingModel;
 
     /**
+     * 生成向量时的维度（与 embedding_model 配套，用于检索时按模型/维度过滤）。
+     */
+    private Integer embeddingDimension;
+    /**
      * Chunk 扩展元数据，JSONB 格式。
      */
     @TableField(typeHandler = JsonbTypeHandler.class)

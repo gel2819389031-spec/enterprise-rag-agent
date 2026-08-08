@@ -15,6 +15,24 @@ const MODEL_TYPE_OPTIONS: { value: ModelType; label: string }[] = [
   { value: 'RERANK', label: 'Rerank' },
 ];
 
+/** 从模型 parameters JSON 解析维度，兼容 {"dimensions":[...]} 与 {"dimension":N}。 */
+function parseParametersDimensions(parameters?: string | null): number[] {
+  if (!parameters) return [];
+  try {
+    const params = JSON.parse(parameters) as {
+      dimensions?: number[];
+      dimension?: number;
+    };
+    if (Array.isArray(params.dimensions)) {
+      return params.dimensions.map(Number).filter((d) => Number.isInteger(d) && d > 0);
+    }
+    if (typeof params.dimension === 'number') return [params.dimension];
+  } catch {
+    // 忽略解析失败
+  }
+  return [];
+}
+
 /* ==================== Provider Tab ==================== */
 
 function ProviderTab() {
@@ -134,6 +152,8 @@ function ConfigTab() {
   const [editing, setEditing] = useState<ModelConfig | null>(null);
   const [open, setOpen] = useState(false);
   const [form] = Form.useForm();
+  // 监听模型类型，EMBEDDING 时才展示维度输入。
+  const modelType = Form.useWatch('modelType', form);
 
   const providers = useQuery({
     queryKey: ['model-providers-available'],
@@ -151,8 +171,24 @@ function ConfigTab() {
   });
 
   const save = useMutation({
-    mutationFn: (v: Partial<ModelConfig>) =>
-      editing ? modelApi.updateConfig(editing.id, v) : modelApi.createConfig(v),
+    mutationFn: (v: Partial<ModelConfig> & { dimensions?: Array<string | number> }) => {
+      const payload: Partial<ModelConfig> = { ...v };
+      if (v.modelType === 'EMBEDDING') {
+        // 将多值维度收敛为去重后的正整数数组，写入 parameters JSON。
+        const dims = Array.from(
+          new Set(
+            (v.dimensions ?? [])
+              .map((d) => Number(String(d).trim()))
+              .filter((d) => Number.isInteger(d) && d > 0),
+          ),
+        );
+        payload.parameters = dims.length
+          ? JSON.stringify({ dimensions: dims })
+          : (payload.parameters ?? '{}');
+      }
+      delete payload.dimensions;
+      return editing ? modelApi.updateConfig(editing.id, payload) : modelApi.createConfig(payload);
+    },
     onSuccess: () => {
       message.success(editing ? '模型已更新' : '模型已创建');
       setOpen(false);
@@ -168,7 +204,12 @@ function ConfigTab() {
 
   const show = (item?: ModelConfig) => {
     setEditing(item ?? null);
-    form.setFieldsValue(item ?? { modelType: 'LLM', isDefault: false, status: 1 });
+    const base = item ?? { modelType: 'LLM', isDefault: false, status: 1 };
+    const dims = parseParametersDimensions(item?.parameters);
+    form.setFieldsValue({
+      ...base,
+      dimensions: dims.length ? dims : undefined,
+    });
     setOpen(true);
   };
 
@@ -208,6 +249,14 @@ function ConfigTab() {
           {
             title: '类型', dataIndex: 'modelType',
             render: (v: ModelType) => <Tag>{v}</Tag>,
+          },
+          {
+            title: '维度',
+            dataIndex: 'parameters',
+            render: (parameters: string | undefined, r: ModelConfig) =>
+              r.modelType === 'EMBEDDING'
+                ? parseParametersDimensions(parameters).join(' / ') || '-'
+                : '-',
           },
           { title: '供应商', dataIndex: 'providerName' },
           {
@@ -255,13 +304,29 @@ function ConfigTab() {
             </Form.Item>
           </Space>
           <Space style={{ width: '100%' }} size="middle">
-            <Form.Item name="modelType" label="类型" rules={[{ required: true }]} style={{ flex: 1 }}>
-              <Select options={MODEL_TYPE_OPTIONS} />
-            </Form.Item>
-            <Form.Item name="isDefault" label="设为默认" style={{ flex: 1 }}>
-              <Select options={[{ value: true, label: '是' }, { value: false, label: '否' }]} />
-            </Form.Item>
+          <Form.Item name="modelType" label="类型" rules={[{ required: true }]} style={{ flex: 1 }}>
+            <Select options={MODEL_TYPE_OPTIONS} />
+          </Form.Item>
+          <Form.Item name="isDefault" label="设为默认" style={{ flex: 1 }}>
+            <Select options={[{ value: true, label: '是' }, { value: false, label: '否' }]} />
+          </Form.Item>
           </Space>
+          {modelType === 'EMBEDDING' && (
+            <Form.Item
+              name="dimensions"
+              label="向量维度"
+              rules={[{ required: true, message: '请至少填写一个维度' }]}
+              extra="支持多个维度，输入数字后回车添加，例如 1536"
+            >
+              <Select
+                mode="tags"
+                placeholder="输入维度后回车"
+                open={false}
+                suffixIcon={null}
+                tokenSeparators={[',', '，', ' ']}
+              />
+            </Form.Item>
+          )}
           <Form.Item name="status" label="状态">
             <Select options={[{ value: 1, label: '启用' }, { value: 0, label: '禁用' }]} />
           </Form.Item>

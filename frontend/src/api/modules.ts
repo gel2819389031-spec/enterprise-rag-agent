@@ -56,15 +56,11 @@ export const documentApi = {
       // 文档解析和模型调用属于长耗时操作，单独放宽为 10 分钟。
       timeout: 10 * 60 * 1000,
     }),
-  upload: (kbId: string, files: File[], onProgress: (n: number) => void,
-           pipelineConfig?: PipelineConfig) => {
+  upload: (kbId: string, files: File[], onProgress: (n: number) => void) => {
     const data = new FormData();
     data.append('knowledgeBaseId', kbId);
     // 多个文件使用同一个 file 字段名，后端接收为 List<MultipartFile>。
     files.forEach((file) => data.append('file', file));
-    if (pipelineConfig) {
-      data.append('pipelineConfig', JSON.stringify(pipelineConfig));
-    }
     return http.post<never, KnowledgeDocument[]>('/api/documents/upload', data, {
       onUploadProgress: (e) => onProgress(e.total ? Math.round((e.loaded / e.total) * 100) : 0),
       timeout: 10 * 60 * 1000,
